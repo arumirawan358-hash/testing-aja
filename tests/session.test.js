@@ -344,6 +344,8 @@ describe('ruang dua pemain', () => {
     expect(guest.state.answers).toHaveLength(2)
     expect(host.state.answers).toHaveLength(1)
     expect(guest.state.error).toMatch(/tersimpan|lanjut/i)
+    expect(guest.state.error).toMatch(/jangan tutup|muat ulang/i)
+    expect(host.state.error).toMatch(/jangan tutup|muat ulang/i)
     guest.reconnect()
     await until(() => host.state.connected && guest.state.connected && host.state.opponentProgress === 2 && guest.state.opponentProgress === 1)
     finish(host); finish(guest)

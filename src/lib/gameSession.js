@@ -233,7 +233,7 @@ export class GameSession {
         clearTimeout(this.connectTimer)
         const inGame = ['quiz', 'waiting', 'results'].includes(this.state.screen)
         const keepStatus = inGame || this.state.status === 'preparing'
-        this.patch({ ...(keepStatus ? {} : { status: 'error' }), error: safeError(error) + (inGame && this.state.screen !== 'results' ? ' Kamu tetap bisa menjawab di tab ini.' : '') })
+        this.patch({ ...(keepStatus ? {} : { status: 'error' }), error: safeError(error) + (inGame && this.state.screen !== 'results' ? ' Kamu tetap bisa menjawab; jangan tutup atau muat ulang tab.' : '') })
       }
     })
   }
@@ -278,7 +278,7 @@ export class GameSession {
     try { connection?.close() } catch { /* already closed */ }
     if (this.state.roomClosed) return
     const retry = this.canRetryConnection()
-    const detail = this.isGuestInRound() ? ' Kamu tetap bisa lanjut; jawaban tersimpan di tab ini.' : retry ? ' Mencoba menghubungkan kembali.' : ''
+    const detail = this.isGuestInRound() ? ' Kamu tetap bisa lanjut; jawaban tersimpan sementara. Jangan tutup atau muat ulang tab.' : retry ? ' Mencoba menghubungkan kembali.' : ''
     this.patch({ connected: false, status: retry ? 'disconnected' : 'error', error: message + detail })
     if (retry) this.scheduleReconnect()
   }
@@ -310,7 +310,7 @@ export class GameSession {
   connectToHost() {
     const peer = this.peer
     if (!peer || peer.destroyed) { this.connectionFailed('Koneksi sudah ditutup. Coba hubungkan kembali.'); return }
-    this.patch({ status: 'connecting', error: this.isGuestInRound() ? 'Sedang menghubungkan kembali. Kamu tetap bisa menjawab di tab ini.' : '' })
+    this.patch({ status: 'connecting', error: this.isGuestInRound() ? 'Sedang menghubungkan kembali. Kamu tetap bisa menjawab; jangan tutup atau muat ulang tab.' : '' })
     let connection
     try { connection = peer.connect(roomPeerId(this.state.code), { reliable: true, serialization: 'json' }) } catch { this.connectionFailed('Tidak dapat terhubung ke ruang. Coba lagi.'); return }
     // PeerJS returns undefined rather than throwing if signaling is disconnected.
@@ -334,15 +334,16 @@ export class GameSession {
     const connection = this.connection
     this.connection = null
     try { connection?.close() } catch { /* no-op */ }
+    const message = this.isGuestInRound() ? 'Sedang menghubungkan kembali. Jawaban tersimpan sementara; jangan tutup atau muat ulang tab.' : 'Sedang menghubungkan kembali ke ruang.'
     if (!this.peer || this.peer.destroyed) {
-      this.patch({ status: 'connecting', error: 'Sedang menghubungkan kembali. Jawaban tetap tersimpan di tab ini.' })
+      this.patch({ status: 'connecting', error: message })
       this.openGuestPeer()
       return
     }
     // Wait for the signaling server's open event before calling connect().
     if (this.peer.disconnected || this.peer.open === false) {
       const peer = this.peer
-      this.patch({ status: 'connecting', error: 'Sedang menghubungkan kembali. Jawaban tetap tersimpan di tab ini.' })
+      this.patch({ status: 'connecting', error: message })
       clearTimeout(this.connectTimer)
       this.connectTimer = setTimeout(() => {
         if (this.peer === peer && !this.state.connected && !this.connection) {
@@ -459,8 +460,8 @@ export class GameSession {
         : this.state.screen === 'results'
           ? 'Koneksi terputus. Hasil tetap ada di tab ini; hubungkan kembali untuk bermain lagi.'
           : this.state.role === 'guest'
-            ? 'Koneksi terputus. Kamu tetap bisa lanjut; jawaban tersimpan di tab ini sampai terhubung kembali.'
-            : 'Teman terputus. Kamu tetap bisa lanjut; hasil bersama tersedia setelah terhubung kembali.'
+            ? 'Koneksi terputus. Kamu tetap bisa lanjut; jawaban tersimpan sementara. Jangan tutup atau muat ulang tab.'
+            : 'Teman terputus. Kamu tetap bisa lanjut; hasil bersama perlu koneksi kembali. Jangan tutup atau muat ulang tab.'
       this.patch({ connected: false, status: inLobby || this.state.role === 'guest' ? 'disconnected' : this.state.status, preparation: inLobby ? null : this.state.preparation, error })
       if (this.state.role === 'guest') this.scheduleReconnect()
     }
