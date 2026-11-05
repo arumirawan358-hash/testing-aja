@@ -1,0 +1,29 @@
+{
+  "name": "kuiskita",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n signal,web -c magenta,cyan \"node server/peer-server.js\" \"vite --host 0.0.0.0\"",
+    "build": "vite build",
+    "preview": "concurrently -k -n signal,web -c magenta,cyan \"node server/peer-server.js\" \"vite preview --host 0.0.0.0\"",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@fontsource-variable/outfit": "^5.2.6",
+    "@fontsource-variable/plus-jakarta-sans": "^5.2.6",
+    "lucide-react": "^0.468.0",
+    "peer": "^1.0.2",
+    "peerjs": "^1.5.5",
+    "qrcode.react": "^4.2.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.4.1",
+    "concurrently": "^9.1.2",
+    "vite": "^6.3.5",
+    "vitest": "^3.1.4"
+  }
+}
