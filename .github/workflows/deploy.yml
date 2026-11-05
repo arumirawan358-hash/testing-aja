@@ -35,7 +35,6 @@ jobs:
         run: npm test
       # Temporary, anonymous probe to verify whether the real Groq endpoint allows browser access.
       - name: Probe Groq browser CORS (no valid key)
-        continue-on-error: true
         run: |
           set -eu
           url='https://api.groq.com/openai/v1/chat/completions'
