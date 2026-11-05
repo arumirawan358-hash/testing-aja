@@ -373,6 +373,36 @@ describe('ruang dua pemain', () => {
     expect(host.state.result.guest.score).toBe(100)
   })
 
+  it('delivers saved results if the guest finished before the connection failed', async () => {
+    const { host, guest } = await joinedGame(3)
+    await host.startGame()
+    await until(() => guest.state.screen === 'quiz')
+    finish(guest)
+    await until(() => host.guestFinished !== null)
+    guest.connection.close()
+    await until(() => !host.state.connected && !guest.state.connected)
+    finish(host)
+    expect(host.state.screen).toBe('results')
+    expect(guest.state.screen).toBe('waiting')
+    guest.reconnect()
+    await until(() => guest.state.screen === 'results')
+    expect(guest.state.result).toEqual(host.state.result)
+    expect(guest.state.result.host.score).toBe(100)
+    expect(guest.state.result.guest.score).toBe(100)
+  })
+
+  it('automatically reconnects a previously joined guest in the lobby', async () => {
+    const { host, guest } = await joinedGame(3, { guestOptions: { reconnectBaseMs: 20 } })
+    guest.connection.close()
+    await until(() => !host.state.connected && !guest.state.connected)
+    await until(() => host.state.connected && guest.state.connected)
+    expect(guest.state.screen).toBe('lobby')
+    expect(guest.state.status).toBe('joined')
+    await host.startGame()
+    await until(() => guest.state.screen === 'quiz')
+    expect(guest.state.questions).toEqual(host.state.questions)
+  })
+
   it('does not replace a working data connection when signaling opens again', async () => {
     const { host, guest, network } = await joinedGame(3)
     await host.startGame()
