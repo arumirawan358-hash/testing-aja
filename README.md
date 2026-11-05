@@ -12,7 +12,13 @@ Kuis belajar SD, SMP, dan SMA: bermain sendiri atau berdua jarak jauh, dengan **
 4. Jawab atau lewati setiap soal. Dalam permainan berdua, hasil dan pembahasan muncul setelah kedua pemain selesai.
 5. Pada hasil, pilih **Main lagi** untuk soal baru dengan pengaturan yang sama. Untuk permainan berdua, kedua pemain dapat membaca pembahasan dahulu dan masing-masing memilih **Main lagi**; mereka kembali ke ruang dan pembuat ruang memulai ronde berikutnya. Kunci tidak perlu dimasukkan ulang selama tetap di ruang yang sama.
 
-Pilih **Bank soal** bila ingin mencoba tanpa API key. Bank soal non-matematika jumlahnya terbatas dan bisa berulang, terutama saat meminta banyak soal. Efek suara dapat dinyalakan atau dimatikan melalui tombol suara di bagian atas halaman; preferensi suara disimpan di browser.
+Pilih **Bank soal** bila ingin mencoba tanpa API key. Bank soal non-matematika jumlahnya terbatas dan bisa berulang, terutama saat meminta banyak soal.
+
+## Profil dan pengaturan
+
+- Klik ikon **Profil** di bagian atas untuk mengubah nama panggilan dan melihat jumlah kuis yang selesai serta nilai terbaik di browser ini. Nama yang disimpan otomatis mengisi formulir pemain berikutnya. Profil dan statistik tidak disinkronkan antarperangkat dan hilang jika data situs dihapus; tidak diperlukan akun.
+- Klik ikon **Pengaturan** untuk mengatur efek suara dan membuka **Tentang web**. Di bagian bawah, sakelar **Hint jawaban** awalnya mati. Saat dinyalakan, pilihan yang dianggap benar akan ditampilkan pada setiap soal; saat dimatikan, hint tidak ditampilkan. Pengaturan dapat diubah saat kuis berlangsung.
+- Hint berlaku untuk browser masing-masing pemain, termasuk saat berdua. Hint menunjukkan jawaban dan nilai tetap dihitung seperti biasa, jadi sepakati penggunaannya bersama teman agar adil. Petunjuk dari AI tetap bisa salah.
 
 ## Soal Groq dan variasi
 
@@ -23,7 +29,7 @@ Pilih **Bank soal** bila ingin mencoba tanpa API key. Bank soal non-matematika j
 ## Keamanan dan privasi
 
 - Situs ini statis dan **tidak membutuhkan Render atau server Groq milik pengelola**. Browser pemain solo/pembuat ruang mengirim key langsung ke `https://api.groq.com` melalui HTTPS dalam header `Authorization`, bersama pengaturan kuis yang diperlukan untuk membuat soal.
-- Aplikasi menyimpan key sementara di memori tab selama sesi (termasuk saat main ulang) dan menghapus rujukannya saat keluar. Aplikasi tidak sengaja menyimpan key di localStorage, sessionStorage, URL, repository, atau pesan permainan kepada teman. Hanya preferensi aktif/mati suara yang disimpan di localStorage.
+- Aplikasi menyimpan key sementara di memori tab selama sesi (termasuk saat main ulang) dan menghapus rujukannya saat keluar. Aplikasi tidak sengaja menyimpan key di localStorage, sessionStorage, URL, repository, atau pesan permainan kepada teman. Nama profil, statistik kuis lokal, preferensi suara, dan preferensi hint disimpan di localStorage browser.
 - Memasukkan key di browser **bukan penyimpanan rahasia yang sempurna**. Orang yang memiliki akses ke perangkat, DevTools, atau ekstensi berbahaya dapat melihatnya. Gunakan perangkat yang tepercaya, atur batas penggunaan di Groq, dan cabut/rotasi key jika pernah dibagikan atau terekspos. Jangan memasukkan informasi pribadi dalam topik atau soal.
 - Mode berdua memakai PeerJS untuk mempertemukan pemain dan WebRTC untuk mengirim data permainan. Soal dan jawaban dikirim ke perangkat teman; bagikan kode ruang hanya dengan orang yang dipercaya. Gangguan PeerJS, WebRTC, STUN/TURN, jaringan, pembatas browser/CORS, atau Groq dapat menghambat permainan.
 

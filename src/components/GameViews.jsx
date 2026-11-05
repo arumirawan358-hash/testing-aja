@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { AlertCircle, ArrowLeft, ArrowRight, BadgeCheck, BookOpen, Check, CheckCircle2, Clock3, Copy, DoorOpen, GraduationCap, Hash, Link2, LoaderCircle, LockKeyhole, RotateCcw, Share2, Sparkles, Target, Trophy, UserRound, UsersRound, WandSparkles, X, XCircle, Zap } from 'lucide-react'
+import AnswerHint from './AnswerHint.jsx'
 import Brand from './Brand.jsx'
 import SoundToggle from './SoundToggle.jsx'
+import MenuButtons from './MenuButtons.jsx'
+import { usePreferences } from './PreferencesContext.jsx'
 import { subjectName } from '../data/subjects.js'
 
 function GameHeader({ state, session }) {
@@ -10,7 +13,7 @@ function GameHeader({ state, session }) {
     if (state.screen === 'results' || state.role === 'solo' || window.confirm('Yakin ingin keluar? Permainan yang sedang berlangsung akan ditutup.')) session.quit()
   }
   return (
-    <header className="game-header"><div className="container game-header-inner"><Brand onClick={leave} /><div className="game-header-right">{state.code && <span className="header-room"><span /> RUANG {state.code}</span>}<SoundToggle /><button className="exit-button" aria-label="Keluar dari permainan" onClick={leave}><DoorOpen size={17} /> <span>Keluar</span></button></div></div></header>
+    <header className="game-header"><div className="container game-header-inner"><Brand onClick={leave} /><div className="game-header-right">{state.code && <span className="header-room"><span /> RUANG {state.code}</span>}<SoundToggle /><MenuButtons /><button className="exit-button" aria-label="Keluar dari permainan" onClick={leave}><DoorOpen size={17} /> <span>Keluar</span></button></div></div></header>
   )
 }
 
@@ -117,6 +120,7 @@ function ProgressPlayer({ name, count, total, color, self }) {
 }
 
 export function Quiz({ state, session }) {
+  const { hintEnabled } = usePreferences()
   const [selected, setSelected] = useState(null)
   const index = state.answers.length
   const question = state.questions[index]
@@ -128,7 +132,7 @@ export function Quiz({ state, session }) {
     <div className="quiz-heading"><div><span className="eyebrow section-eyebrow"><span>✦</span> AYO, KAMU PASTI BISA!</span><h1>Satu soal lebih dekat ke hebat.</h1><p>Tarik napas, baca soalnya, dan jawab semampumu.</p></div><div className="quiz-illustration">✳<span>✦</span></div></div>
     <Notice state={state} session={session} />
     <div className="quiz-progress surface"><ProgressPlayer name={state.selfName} count={index} total={total} color="purple" self />{state.role !== 'solo' && <ProgressPlayer name={state.opponentName} count={state.opponentProgress} total={total} color="orange" />}</div>
-    <section className="surface question-card"><div className="question-topline"><span className="question-count"><span>SOAL {index + 1}</span> <small>/ {total}</small></span><Timer startedAt={state.startedAt} /></div><div className="question-subject"><BookOpen size={14} /> {subjectName(state.config)} <span>•</span> Kelas {state.config.grade}</div><h2>{question.prompt}</h2><div className="answer-options" role="radiogroup" aria-label={`Pilihan jawaban soal ${index + 1}`}>{question.options.map((option, optionIndex) => <button type="button" role="radio" data-sound="answer" aria-checked={selected === optionIndex} className={`answer-option ${selected === optionIndex ? 'selected' : ''}`} key={optionIndex} onClick={() => setSelected(optionIndex)}><span className="answer-letter">{'ABCD'[optionIndex]}</span><span className="answer-text">{option}</span><span className="answer-circle">{selected === optionIndex && <Check size={14} />}</span></button>)}</div><div className="question-actions"><button className="skip-button" disabled={disconnected} onClick={() => session.submitAnswer(null)}>Lewati soal</button><button className="button button-primary next-button" data-sound="next" disabled={selected === null || disconnected} onClick={() => session.submitAnswer(selected)}>{index === total - 1 ? 'Selesaikan kuis' : 'Soal selanjutnya'} <ArrowRight size={18} /></button></div><p className="answer-note"><LockKeyhole size={14} /> Jawaban dan pembahasan akan terlihat setelah permainan selesai.</p></section>
+    <section className="surface question-card"><div className="question-topline"><span className="question-count"><span>SOAL {index + 1}</span> <small>/ {total}</small></span><Timer startedAt={state.startedAt} /></div><div className="question-subject"><BookOpen size={14} /> {subjectName(state.config)} <span>•</span> Kelas {state.config.grade}</div><h2>{question.prompt}</h2><AnswerHint question={question} enabled={hintEnabled} /><div className="answer-options" role="radiogroup" aria-label={`Pilihan jawaban soal ${index + 1}`}>{question.options.map((option, optionIndex) => <button type="button" role="radio" data-sound="answer" aria-checked={selected === optionIndex} className={`answer-option ${selected === optionIndex ? 'selected' : ''}`} key={optionIndex} onClick={() => setSelected(optionIndex)}><span className="answer-letter">{'ABCD'[optionIndex]}</span><span className="answer-text">{option}</span><span className="answer-circle">{selected === optionIndex && <Check size={14} />}</span></button>)}</div><div className="question-actions"><button className="skip-button" disabled={disconnected} onClick={() => session.submitAnswer(null)}>Lewati soal</button><button className="button button-primary next-button" data-sound="next" disabled={selected === null || disconnected} onClick={() => session.submitAnswer(selected)}>{index === total - 1 ? 'Selesaikan kuis' : 'Soal selanjutnya'} <ArrowRight size={18} /></button></div><p className="answer-note"><LockKeyhole size={14} /> {hintEnabled ? 'Hint aktif untukmu. Pembahasan tersedia setelah permainan selesai.' : 'Jawaban dan pembahasan akan terlihat setelah permainan selesai.'}</p></section>
     <div className="encouragement"><Sparkles size={16} /> Setiap jawaban adalah langkah untuk belajar. Semangat!</div>
   </main></div>
 }
