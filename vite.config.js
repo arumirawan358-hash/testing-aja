@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 const peerProxy = {
+  '/api/groq': { target: 'http://127.0.0.1:9002', changeOrigin: true },
   '/peerjs': {
     target: 'http://127.0.0.1:9001',
     changeOrigin: true,

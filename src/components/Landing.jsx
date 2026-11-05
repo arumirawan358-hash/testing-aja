@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ArrowDown, ArrowRight, ArrowUpRight, BadgeCheck, BookOpen, Check, ChevronRight, CircleHelp, Copy, GraduationCap, Hash, Heart, KeyRound, Layers3, LockKeyhole, Play, Plus, ShieldCheck, Sparkles, UsersRound, WandSparkles, Zap } from 'lucide-react'
 import Brand from './Brand.jsx'
 import { CUSTOM_SUBJECT, DEFAULT_CONFIG, LEVELS, getLevel, validateConfig, validateName } from '../data/subjects.js'
+import { isGroqConfigured } from '../lib/groq.js'
 
 const features = [
   { icon: Layers3, title: '1–500 soal', subtitle: 'Pilih sesuai maumu', color: 'violet' },
@@ -36,10 +37,10 @@ function SetupForm({ session }) {
     setConfig({ ...config, level: levelId, grade: level.grades[0], subject: level.subjects[0] })
   }
   function start(solo = false) {
-    const message = validateName(name) || validateConfig(config) || (config.source === 'ai' && !apiKey.trim() ? 'Masukkan Gemini API key terlebih dahulu, ya.' : '')
+    const message = validateName(name) || validateConfig(config) || (config.source === 'ai' && !apiKey.trim() ? 'Masukkan Gemini API key terlebih dahulu, ya.' : '') || (config.source === 'groq' && !isGroqConfigured() ? 'Server Groq belum ditautkan. Hubungi pengelola situs.' : '')
     if (message) { setError(message); return }
     setError('')
-    const data = { name, config: { ...config, count: Number(config.count), grade: Number(config.grade) }, apiKey }
+    const data = { name, config: { ...config, count: Number(config.count), grade: Number(config.grade) }, apiKey: config.source === 'ai' ? apiKey : '' }
     if (solo) session.startSolo(data)
     else session.createRoom(data)
   }
@@ -71,14 +72,14 @@ function SetupForm({ session }) {
           <label className="field"><span>Mata pelajaran <i>*</i></span>
             <select value={config.subject} onChange={(event) => setConfig({ ...config, subject: event.target.value })}>
               {currentLevel.subjects.map((subject) => <option key={subject} value={subject}>{subject}</option>)}
-              {config.source === 'ai' && <option value={CUSTOM_SUBJECT}>Lainnya (khusus AI)</option>}
+              {config.source !== 'bank' && <option value={CUSTOM_SUBJECT}>Lainnya (khusus AI)</option>}
             </select>
           </label>
           <label className="field"><span>Jumlah soal <i>*</i></span>
             <div className="number-input"><input type="number" min="1" max="500" step="1" value={config.count} onChange={(event) => setConfig({ ...config, count: event.target.value })} aria-describedby="count-help" /><span>soal</span></div>
           </label>
         </div>
-        {config.source === 'ai' && config.subject === CUSTOM_SUBJECT && <label className="field"><span>Nama mata pelajaran <i>*</i></span><input value={config.customSubject} onChange={(event) => setConfig({ ...config, customSubject: event.target.value })} placeholder="Contoh: Seni Budaya atau PJOK" maxLength={60} /></label>}
+        {config.source !== 'bank' && config.subject === CUSTOM_SUBJECT && <label className="field"><span>Nama mata pelajaran <i>*</i></span><input value={config.customSubject} onChange={(event) => setConfig({ ...config, customSubject: event.target.value })} placeholder="Contoh: Seni Budaya atau PJOK" maxLength={60} /></label>}
         <div className="quick-counts" id="count-help"><span>Pilihan cepat</span>{[10, 20, 50, 100, 500].map((count) => <button type="button" key={count} className={Number(config.count) === count ? 'active' : ''} onClick={() => setConfig({ ...config, count })}>{count}</button>)}<small>maks. 500</small></div>
         <div className="source-section">
           <div className="field-title">Sumber soal <span>Pilih sesuai kebutuhanmu</span></div>
@@ -86,8 +87,11 @@ function SetupForm({ session }) {
             <button type="button" role="radio" aria-checked={config.source === 'bank'} className={`source-option ${config.source === 'bank' ? 'selected' : ''}`} onClick={() => setConfig({ ...config, source: 'bank', subject: config.subject === CUSTOM_SUBJECT ? currentLevel.subjects[0] : config.subject })}>
               <span className="source-icon bank-icon"><BookOpen size={18} /></span><span><strong>Bank soal</strong><small>Langsung main</small></span><span className="radio-dot" />
             </button>
+            <button type="button" role="radio" aria-checked={config.source === 'groq'} className={`source-option ${config.source === 'groq' ? 'selected' : ''}`} onClick={() => setConfig({ ...config, source: 'groq' })}>
+              <span className="source-icon ai-icon"><Sparkles size={18} /></span><span><strong>Groq AI</strong><small>{isGroqConfigured() ? 'Tanpa isi kunci' : 'Belum terhubung'}</small></span><span className="radio-dot" />
+            </button>
             <button type="button" role="radio" aria-checked={config.source === 'ai'} className={`source-option ${config.source === 'ai' ? 'selected' : ''}`} onClick={() => setConfig({ ...config, source: 'ai' })}>
-              <span className="source-icon ai-icon"><Sparkles size={18} /></span><span><strong>Gemini AI</strong><small>Soal dibuat AI</small></span><span className="radio-dot" />
+              <span className="source-icon ai-icon"><WandSparkles size={18} /></span><span><strong>Gemini AI</strong><small>Gunakan kuncimu</small></span><span className="radio-dot" />
             </button>
           </div>
           {config.source === 'bank' ? (
@@ -95,9 +99,11 @@ function SetupForm({ session }) {
           ) : (
             <div className="ai-key-area">
               <label className="field"><span>Topik khusus <em>(opsional)</em></span><input value={config.topic} onChange={(event) => setConfig({ ...config, topic: event.target.value })} placeholder="Contoh: pecahan atau tata surya" maxLength={100} /></label>
-              <label className="field"><span>Gemini API key <i>*</i></span><div className="key-input"><input type={showKey ? 'text' : 'password'} value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Masukkan API key Gemini" autoComplete="off" spellCheck="false" /><button type="button" onClick={() => setShowKey(!showKey)} aria-label={showKey ? 'Sembunyikan API key' : 'Tampilkan API key'}>{showKey ? 'Sembunyikan' : 'Lihat'}</button></div></label>
-              <p className="source-note"><LockKeyhole size={14} /> Kunci hanya tersimpan sementara di browser dan dikirim langsung ke Google, bukan ke teman. Kuota atau biaya Gemini dapat berlaku.</p>
-              <a className="text-link" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer">Dapatkan API key di Google AI Studio <ArrowUpRight size={14} /></a>
+              {config.source === 'ai' ? <>
+                <label className="field"><span>Gemini API key <i>*</i></span><div className="key-input"><input type={showKey ? 'text' : 'password'} value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Masukkan API key Gemini" autoComplete="off" spellCheck="false" /><button type="button" onClick={() => setShowKey(!showKey)} aria-label={showKey ? 'Sembunyikan API key' : 'Tampilkan API key'}>{showKey ? 'Sembunyikan' : 'Lihat'}</button></div></label>
+                <p className="source-note"><LockKeyhole size={14} /> Kunci hanya tersimpan sementara di browser dan dikirim langsung ke Google, bukan ke teman. Kuota atau biaya Gemini dapat berlaku.</p>
+                <a className="text-link" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer">Dapatkan API key di Google AI Studio <ArrowUpRight size={14} /></a>
+              </> : <p className={`source-note ${isGroqConfigured() ? '' : 'warm'}`}><LockKeyhole size={14} /> {isGroqConfigured() ? 'Pemain tidak perlu memasukkan API key; kunci digunakan hanya oleh server jika sudah dikonfigurasi.' : 'Server Groq belum ditautkan oleh pengelola situs.'}</p>}
               {Number(config.count) > 100 && <p className="source-note warm"><CircleHelp size={14} /> Soal dalam jumlah besar dibuat bertahap dan bisa memerlukan waktu serta kuota lebih banyak.</p>}
             </div>
           )}

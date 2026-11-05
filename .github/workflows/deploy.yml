@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - arena/207c12a6-testing-aja
+      - arena/e22c26f0-testing-aja
   workflow_dispatch:
 
 permissions:
@@ -36,12 +36,14 @@ jobs:
         env:
           VITE_BASE_PATH: /${{ github.event.repository.name }}/
           VITE_SIGNALING_MODE: cloud
+          VITE_GROQ_API_URL: ${{ vars.GROQ_API_URL }}
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./dist
 
   deploy:
+    if: github.ref == 'refs/heads/main'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

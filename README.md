@@ -15,9 +15,10 @@ Ruang hanya menampung dua orang dan aktif selama halaman host tetap terbuka. Jan
 ## Sumber soal
 
 - **Bank soal** langsung dapat dipakai tanpa kunci API. Bank ini adalah kumpulan latihan ringkas; terutama untuk jumlah besar, soal nonmatematika **dapat berulang**. Soal matematika dibuat dari pola dan angka yang bervariasi.
-- **Gemini AI** membuat soal baru sesuai jenjang, kelas, dan mata pelajaran menggunakan Gemini 2.5 Flash. Pengguna juga bisa meminta topik khusus atau memilih **Lainnya (khusus AI)** untuk menulis mata pelajaran lain. Pembuat ruang perlu memasukkan [Gemini API key dari Google AI Studio](https://aistudio.google.com/app/apikey). Kunci disimpan hanya di memori browser selama sesi, dikirim langsung ke Google melalui HTTPS, dan tidak dikirim kepada pemain lain atau disimpan di repositori. Kuota, ketersediaan model, dan kemungkinan biaya mengikuti akun Google pemilik kunci. Jumlah besar dibuat bertahap sehingga membutuhkan lebih banyak waktu dan kuota. Tamu tidak membutuhkan kunci.
+- **Groq AI** menggunakan `openai/gpt-oss-120b`, model berkemampuan tinggi di Groq. Setelah pengelola menyiapkan backend sesuai petunjuk di bawah, pemain **tidak perlu melihat atau memasukkan API key**. Topik khusus dan mata pelajaran lain dapat ditulis sendiri. Tanpa backend yang ditautkan, pilihan ini ditandai belum terhubung.
+- **Gemini AI** menggunakan Gemini 2.5 Flash. Pembuat ruang memasukkan [Gemini API key dari Google AI Studio](https://aistudio.google.com/app/apikey). Kunci disimpan sementara dalam memori browser, dikirim langsung ke Google melalui HTTPS, dan tidak dibagikan kepada teman atau disimpan di repositori. Tamu tidak membutuhkan kunci. Topik dan mata pelajaran khusus juga didukung.
 
-AI dapat membuat kesalahan. Periksa soal dan pembahasan dengan guru atau sumber tepercaya; aplikasi ini bukan pengganti penilaian resmi sekolah.
+Soal AI dibuat bertahap; jumlah besar dapat memerlukan waktu dan kuota lebih banyak. Kuota, ketersediaan model, dan kemungkinan biaya mengikuti layanan serta akun pemilik kunci. AI dapat membuat kesalahan: periksa soal dan pembahasan dengan guru atau sumber tepercaya.
 
 ## Menjalankan di komputer sendiri
 
@@ -25,39 +26,46 @@ Persyaratan: Node.js 20 atau lebih baru dan npm.
 
 ```bash
 npm ci
+# Opsional untuk Groq: salin .env.example menjadi .env dan isi GROQ_API_KEY secara privat.
 npm run dev
 ```
 
-Buka alamat yang ditampilkan Vite. Perintah ini menjalankan server penghubung PeerJS lokal dan situs Vite; browser mengakses keduanya melalui origin yang sama. Untuk build dan pratinjau produksi lokal:
+Buka alamat Vite yang ditampilkan. Perintah ini menjalankan server penghubung PeerJS lokal, server AI, dan Vite; browser mengakses server melalui proxy pada origin yang sama. Tanpa `GROQ_API_KEY`, server Groq akan menjelaskan bahwa konfigurasi belum tersedia, sedangkan bank soal dan Gemini tetap bisa dipakai. File `.env` diabaikan Git; jangan membagikannya atau memasukkan kunci ke kode.
+
+Untuk build, pratinjau, dan uji otomatis:
 
 ```bash
+npm test
 npm run build
 npm run preview
 ```
 
-Uji otomatis:
+## GitHub Pages dan backend Groq
 
-```bash
-npm test
-```
+GitHub Pages hanya menyajikan file statis. **Ia tidak bisa menyimpan API key secara rahasia atau menjalankan server Groq.** Bank soal dan Gemini tetap berfungsi tanpa backend Groq. Mode berdua di Pages menggunakan **PeerJS Cloud** untuk mempertemukan pemain dan **WebRTC** untuk data permainan. Jaringan yang membatasi WebRTC/STUN/TURN atau gangguan layanan pihak ketiga dapat menghalangi koneksi.
 
-## GitHub Pages
+### Mengaktifkan Groq untuk semua pemain
 
-Workflow `.github/workflows/deploy.yml` sudah menyiapkan build, pengujian, dan deployment ke GitHub Pages. Pada repositori GitHub:
+Dibutuhkan akun hosting yang dapat menjalankan Node.js. Contoh berikut memakai Render; `render.yaml` menyediakan konfigurasi awal layanan gratis (syarat, kuota, dan kebijakan penyedia dapat berubah).
 
-1. Buka **Settings → Pages**.
-2. Di **Build and deployment → Source**, pilih **GitHub Actions**. Pastikan GitHub Actions diizinkan untuk repositori.
-3. Gabungkan perubahan ini ke `main` agar workflow **Deploy KuisKita to GitHub Pages** berjalan otomatis. Jika workflow sudah gagal sebelum Pages diaktifkan, buka tab **Actions**, pilih workflow tersebut, lalu pilih **Re-run failed jobs**.
-4. Setelah workflow berhasil, buka alamat yang ditampilkan pada tab Pages. Untuk repositori ini alamat yang diharapkan adalah `https://arumirawan358-hash.github.io/testing-aja/`.
+1. **Cabut/rotate setiap API key yang pernah dibagikan atau terekspos**, lalu buat key baru di [Groq Console](https://console.groq.com/keys). Jangan kirim key baru lewat chat, commit, variabel GitHub publik, atau formulir permainan.
+2. Setelah perubahan ini ada di branch `main` GitHub, [deploy backend ke Render](https://render.com/deploy?repo=https://github.com/arumirawan358-hash/testing-aja), atau buka [Render Dashboard](https://dashboard.render.com/) dan pilih **New → Blueprint**. Hubungkan repository ini dan gunakan branch `main` yang berisi `render.yaml`. Berikan key baru secara privat pada nilai environment **`GROQ_API_KEY`** yang diminta Render, lalu deploy. Jika layanan/Blueprint sudah ada dan Render tidak meminta key, tambahkan atau perbarui `GROQ_API_KEY` di menu **Environment** layanan dan deploy ulang. Jangan simpan key di file `render.yaml`.
+3. Setelah layanan aktif, salin **URL HTTPS publik** layanan, misalnya `https://nama-layanan.onrender.com` (tanpa `/api/groq/questions`). Membuka `URL/health` hanya memeriksa bahwa server hidup; itu **belum** membuktikan Groq berhasil merespons.
+4. Di GitHub repository buka **Settings → Secrets and variables → Actions → Variables → New repository variable**. Buat variabel **`GROQ_API_URL`** dengan nilai URL HTTPS backend tersebut. Variabel ini adalah URL publik, **bukan** API key; nilainya masuk ke JavaScript situs. Key Groq tetap hanya di environment server Render.
+5. Buka **Actions → Deploy KuisKita to GitHub Pages → Run workflow**, pilih `main`, lalu jalankan. Tunggu build dan deployment berhasil. Workflow juga berjalan otomatis saat `main` diperbarui. Pastikan **Settings → Pages → Source** menggunakan **GitHub Actions**.
+6. Untuk uji sungguhan, jalankan **Actions → Uji Groq langsung → Run workflow** pada `main`. Workflow meminta satu soal melalui backend dan memeriksa format jawabannya tanpa memerlukan API key di GitHub. Periksa status dan langkah uji di log Actions. Selanjutnya buka [KuisKita](https://arumirawan358-hash.github.io/testing-aja/), pilih **Groq AI**, lalu coba satu soal dengan **Latihan sendiri**. Tes otomatis lokal menggunakan respons tiruan, bukan bukti respons Groq nyata.
 
-Mode GitHub Pages tidak memerlukan server aplikasi milik sendiri: halaman statis menggunakan **PeerJS Cloud** untuk mempertemukan pemain dan koneksi **WebRTC** untuk mengirim data permainan. STUN dan relay TURN publik digunakan bila diperlukan. Layanan pihak ketiga tersebut dan jaringan masing-masing pemain memengaruhi ketersediaan; jaringan yang membatasi WebRTC, STUN, atau TURN dapat menghalangi koneksi. Untuk layanan yang lebih andal, sediakan PeerServer dan TURN sendiri.
+Origin yang diizinkan di `render.yaml` adalah `https://arumirawan358-hash.github.io` (origin tanpa path). Sesuaikan `ALLOWED_ORIGINS` pada environment server jika domain situs berubah; beberapa origin dapat dipisahkan dengan koma. `GROQ_MODEL` dapat diubah di server jika model tersebut tidak tersedia pada akun, tetapi ketersediaan dan perilaku formatnya harus diuji ulang.
 
-### Pengaturan deployment alternatif
+**Batas dan keamanan:** layanan gratis Render dapat tertidur dan membutuhkan waktu untuk bangun. Kuota/rate limit Groq dapat memperlambat atau menggagalkan pembuatan banyak soal. Backend membatasi ukuran input, permintaan per IP dan jumlah permintaan bersamaan, tetapi endpoint tetap publik: CORS **bukan autentikasi** dan dapat dipalsukan oleh klien non-browser. Pembatasan dalam memori juga tidak menjamin batas global di beberapa instance/restart. Untuk penggunaan publik yang lebih luas, tambahkan autentikasi/anti-abuse dan batas di gateway, pantau penggunaan serta atur batas biaya/kuota di Groq. API key tidak dikirim ke browser maupun kepada pemain lain.
+
+### Variabel build lainnya
 
 Variabel berikut dibaca saat **build**, bukan saat runtime:
 
 - `VITE_BASE_PATH`: path situs, misalnya `/testing-aja/` di GitHub Pages, atau `/` pada root domain.
 - `VITE_SIGNALING_MODE`: `local` (default, gunakan proxy yang disertakan) atau `cloud` (PeerJS Cloud).
+- `VITE_GROQ_API_URL`: URL HTTPS backend publik; workflow Pages mengisinya dari repository variable `GROQ_API_URL`.
 - `VITE_PEER_HOST`, `VITE_PEER_PORT`, `VITE_PEER_PATH`, `VITE_PEER_SECURE`: opsional untuk PeerServer sendiri saat mode `cloud`.
 - `VITE_TURN_URLS` (dipisahkan koma), `VITE_TURN_USERNAME`, `VITE_TURN_CREDENTIAL`: opsional untuk mengganti relay publik.
 

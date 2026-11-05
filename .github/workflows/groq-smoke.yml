@@ -1,0 +1,21 @@
+name: Uji Groq langsung
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Uji satu soal Groq melalui backend
+        run: node scripts/check-groq.mjs
+        env:
+          GROQ_API_URL: ${{ vars.GROQ_API_URL }}

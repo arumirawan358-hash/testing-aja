@@ -46,7 +46,7 @@ function PlayerCard({ name, label, color, waiting = false }) {
 
 function SettingsSummary({ config }) {
   if (!config) return null
-  return <div className="settings-summary"><div><GraduationCap size={17} /><span>Jenjang <strong>{config.level} · Kelas {config.grade}</strong></span></div><div><BookOpen size={17} /><span>Pelajaran <strong>{subjectName(config)}</strong></span></div><div><LayersIcon /><span>Jumlah <strong>{config.count} soal</strong></span></div><div><Sparkles size={17} /><span>Sumber <strong>{config.source === 'ai' ? 'Gemini AI' : 'Bank soal'}</strong></span></div></div>
+  return <div className="settings-summary"><div><GraduationCap size={17} /><span>Jenjang <strong>{config.level} · Kelas {config.grade}</strong></span></div><div><BookOpen size={17} /><span>Pelajaran <strong>{subjectName(config)}</strong></span></div><div><LayersIcon /><span>Jumlah <strong>{config.count} soal</strong></span></div><div><Sparkles size={17} /><span>Sumber <strong>{config.source === 'groq' ? 'Groq AI' : config.source === 'ai' ? 'Gemini AI' : 'Bank soal'}</strong></span></div></div>
 }
 function LayersIcon() { return <span className="layers-symbol">◫</span> }
 
@@ -163,7 +163,7 @@ export function Results({ state, session }) {
       const skipped = answer === null || answer === undefined
       return <article className="review-item" key={question.id || index}><div className="review-item-heading"><span>SOAL {index + 1}</span><span className={`review-status ${correct ? 'correct' : 'incorrect'}`}>{correct ? <Check size={14} /> : <X size={14} />}{correct ? 'Benar' : skipped ? 'Dilewati' : 'Belum tepat'}</span></div><h3>{question.prompt}</h3><p>Jawabanmu: <strong className={correct ? 'correct-text' : 'incorrect-text'}>{skipped ? 'Dilewati' : question.options[answer]}</strong></p>{!correct && <p>Jawaban benar: <strong className="correct-text">{question.options[question.answer]}</strong></p>}<div className="explanation"><BookOpen size={16} /><span>{question.explanation}</span></div></article>
     })}</div>{visible < state.questions.length && <button className="button button-outline load-more" onClick={() => setVisible((current) => Math.min(state.questions.length, current + 10))}>Muat lebih banyak ({Math.min(visible, state.questions.length)}/{state.questions.length}) <ArrowRight size={16} /></button>}
-    {state.config.source === 'ai' && <p className="ai-disclaimer">Soal dan pembahasan dibuat oleh AI dan bisa keliru. Periksa kembali dengan guru atau sumber tepercaya.</p>}</section>
+    {state.config.source !== 'bank' && <p className="ai-disclaimer">Soal dan pembahasan dibuat oleh AI dan bisa keliru. Periksa kembali dengan guru atau sumber tepercaya.</p>}</section>
     <button className="button button-primary play-again" onClick={() => session.quit()}><RotateCcw size={17} /> Main lagi</button>
   </main></div>
 }
