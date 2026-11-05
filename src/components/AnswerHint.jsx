@@ -1,9 +1,6 @@
-import { Lightbulb } from 'lucide-react'
-
+// A small local-only marker; nothing about this preference is sent to the other player.
 export default function AnswerHint({ question, enabled }) {
   if (!enabled || !question || !Number.isInteger(question.answer) || question.answer < 0 || question.answer > 3 || !Array.isArray(question.options) || typeof question.options[question.answer] !== 'string') return null
-  return <aside className="answer-hint" aria-live="polite">
-    <span className="answer-hint-icon"><Lightbulb size={19} /></span>
-    <div><strong>Hint jawaban</strong><p>Jawaban yang disarankan: <b>{'ABCD'[question.answer]}. {question.options[question.answer]}</b></p></div>
-  </aside>
+  const letter = 'ABCD'[question.answer]
+  return <span className="answer-hint" aria-label={`Penanda ${letter}`}><span aria-hidden="true">✦</span> {letter}</span>
 }

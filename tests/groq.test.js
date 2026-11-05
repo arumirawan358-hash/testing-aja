@@ -62,12 +62,13 @@ describe('Groq langsung dari browser', () => {
     expect(questions).toHaveLength(500)
     expect(questions.every(isValidQuestion)).toBe(true)
     expect(new Set(questions.map((item) => questionFingerprint(item.prompt))).size).toBe(500)
-    expect(fetchImpl).toHaveBeenCalledTimes(34)
+    expect(fetchImpl).toHaveBeenCalledTimes(63)
     expect(progress[0]).toEqual([0, 500])
     expect(progress.at(-1)).toEqual([500, 500])
     const bodies = fetchImpl.mock.calls.map(([, request]) => JSON.parse(request.body))
     expect(new Set(bodies.map((body) => body.seed)).size).toBeGreaterThan(1)
-    expect(bodies.at(-1).messages[1].content).toContain('Buat tepat 5 soal')
+    expect(bodies.at(-1).messages[1].content).toContain('Buat tepat 4 soal')
+    expect(bodies.every((body) => body.max_completion_tokens <= 3200)).toBe(true)
     expect(bodies[1].messages[1].content).toContain('Jangan ulangi')
     expect(questions.every((item) => item.options[item.answer] === 'Pilihan benar')).toBe(true)
   })
@@ -104,8 +105,58 @@ describe('Groq langsung dari browser', () => {
       .mockImplementation(normal)
     const questions = await generateGroqQuestions({ ...config, count: 15 }, fakeKey, { fetchImpl })
     expect(questions).toHaveLength(15)
-    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).messages[1].content).toContain('Buat tepat 15 soal')
-    expect(JSON.parse(fetchImpl.mock.calls[1][1].body).messages[1].content).toContain('Buat tepat 7 soal')
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).messages[1].content).toContain('Buat tepat 8 soal')
+    expect(JSON.parse(fetchImpl.mock.calls[1][1].body).messages[1].content).toContain('Buat tepat 4 soal')
+  })
+
+  it.each([50, 100, 500])('splits oversized requests automatically for %i questions', async (count) => {
+    let next = 0
+    const fetchImpl = vi.fn(async (_url, request) => {
+      const body = JSON.parse(request.body)
+      const amount = Number(body.messages[1].content.match(/Buat tepat (\d+) soal/)[1])
+      if (amount > 4) return new Response('{"error":{"message":"Request too large"}}', { status: 413 })
+      return reply(Array.from({ length: amount }, () => makeQuestion(++next)))
+    })
+    const questions = await generateGroqQuestions({ ...config, count }, fakeKey, { fetchImpl })
+    expect(questions).toHaveLength(count)
+    expect(questions.every(isValidQuestion)).toBe(true)
+    expect(new Set(questions.map((q) => q.prompt)).size).toBe(count)
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).max_completion_tokens).toBe(3200)
+    expect(JSON.parse(fetchImpl.mock.calls[1][1].body).max_completion_tokens).toBe(2100)
+  })
+
+  it('shrinks an oversized one-question prompt and token budget without exposing provider details', async () => {
+    const fetchImpl = vi.fn(async (_url, request) => {
+      const body = JSON.parse(request.body)
+      if (body.messages[1].content.includes('Jangan ulangi')) return new Response(JSON.stringify({ error: { message: `maximum context length ${fakeKey}` } }), { status: 400 })
+      if (body.max_completion_tokens > 700) return new Response('{}', { status: 413 })
+      return reply([makeQuestion(9)])
+    })
+    const questions = await generateGroqQuestions({ ...config, count: 1 }, fakeKey, { fetchImpl, avoidPrompts: ['Pertanyaan sebelumnya'] })
+    expect(questions).toHaveLength(1)
+    const bodies = fetchImpl.mock.calls.map(([, request]) => JSON.parse(request.body))
+    expect(bodies[0].messages[1].content).toContain('Jangan ulangi')
+    expect(bodies.at(-1).messages[1].content).not.toContain('Jangan ulangi')
+    expect(bodies.at(-1).max_completion_tokens).toBeLessThanOrEqual(700)
+    const alwaysTooLarge = vi.fn().mockResolvedValue(new Response(`{\"error\":\"${fakeKey}\"}`, { status: 413 }))
+    const error = await generateGroqQuestions({ ...config, count: 1 }, fakeKey, { fetchImpl: alwaysTooLarge }).catch((failure) => failure)
+    expect(error.message).toContain('Batas token')
+    expect(error.message).not.toContain(fakeKey)
+  })
+
+  it('can resume valid completed batches after a failure without requesting them again', async () => {
+    let checkpoint = []
+    const failed = vi.fn().mockResolvedValueOnce(reply(Array.from({ length: 8 }, (_, index) => makeQuestion(index + 1))))
+      .mockResolvedValueOnce(new Response('{}', { status: 401 }))
+    await expect(generateGroqQuestions({ ...config, count: 10 }, fakeKey, { fetchImpl: failed, onCheckpoint: (items) => { checkpoint = items } })).rejects.toThrow('ditolak')
+    expect(checkpoint).toHaveLength(8)
+    const resumed = vi.fn().mockResolvedValue(reply([makeQuestion(9), makeQuestion(10)]))
+    const progress = []
+    const result = await generateGroqQuestions({ ...config, count: 10 }, fakeKey, { fetchImpl: resumed, initialQuestions: checkpoint, onProgress: (done) => progress.push(done) })
+    expect(result).toHaveLength(10)
+    expect(resumed).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(resumed.mock.calls[0][1].body).messages[1].content).toContain('Buat tepat 2 soal')
+    expect(progress[0]).toBe(8)
   })
 
   it('handles denied keys and rate limits without exposing provider error details', async () => {
@@ -114,7 +165,7 @@ describe('Groq langsung dari browser', () => {
     expect(error.message).toContain('ditolak')
     expect(error.message).not.toContain(fakeKey)
     const limited = vi.fn().mockResolvedValue(new Response('{}', { status: 429, headers: { 'retry-after': '0.001' } }))
-    await expect(generateGroqQuestions({ ...config, count: 1 }, fakeKey, { fetchImpl: limited })).rejects.toThrow('Kuota')
+    await expect(generateGroqQuestions({ ...config, count: 1 }, fakeKey, { fetchImpl: limited })).rejects.toThrow('kuota')
     expect(limited).toHaveBeenCalledTimes(3)
   })
 
