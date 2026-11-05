@@ -1,24 +1,25 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { createServer } from 'node:http'
+import { readFile } from 'node:fs/promises'
+import { extname, join } from 'node:path'
 import { chromium } from 'playwright'
 
-const server = spawn('npm', ['run', 'preview'], { env: { ...process.env, VITE_BASE_PATH: '/testing-aja/' }, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
-let logs = ''
+const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2' }
+const server = createServer(async (request, response) => {
+  const pathname = new URL(request.url, 'http://localhost').pathname
+  if (!pathname.startsWith('/testing-aja/')) { response.writeHead(404).end(); return }
+  const relative = pathname.slice('/testing-aja/'.length) || 'index.html'
+  try {
+    const file = await readFile(join(process.cwd(), 'dist', relative))
+    response.writeHead(200, { 'content-type': mime[extname(relative)] || 'application/octet-stream' }).end(file)
+  } catch { response.writeHead(404).end() }
+})
 let browser, host, guest
 let stage = 'server'
 const networkFailures = []
 const errors = []
 try {
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Preview did not start: ${logs}`)), 30000)
-    const output = (data) => {
-      logs += String(data)
-      if (logs.includes('Local:')) { clearTimeout(timer); resolve() }
-    }
-    server.stdout.on('data', output)
-    server.stderr.on('data', output)
-    server.on('exit', (code) => { clearTimeout(timer); reject(new Error(`Preview exited ${code}: ${logs}`)) })
-  })
+  await new Promise((resolve) => server.listen(4173, '127.0.0.1', resolve))
   stage = 'launch browser'
   browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox'] })
   const hostContext = await browser.newContext(), guestContext = await browser.newContext()
@@ -58,6 +59,8 @@ try {
   stage = 'host creates room'
   await host.getByRole('button', { name: 'Buat ruang' }).click()
   await host.locator('.room-code').waitFor()
+  stage = 'host signaling'
+  await host.waitForFunction(() => { const button = document.querySelector('.room-code-actions button'); return button && !button.disabled }, null, { timeout: 45000 })
   const code = (await host.locator('.room-code').getAttribute('aria-label')).match(/[A-Z0-9]{6}$/)[0]
   await guest.getByLabel('Nama panggilan untuk bergabung').fill('Mentari')
   await guest.getByLabel('Kode ruang').fill(code)
@@ -81,5 +84,5 @@ try {
   throw error
 } finally {
   await browser?.close()
-  try { process.kill(-server.pid, 'SIGTERM') } catch { /* process already exited */ }
+  server.close()
 }
