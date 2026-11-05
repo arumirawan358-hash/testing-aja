@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: kuiskita-groq-api
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm run start:groq
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+      - key: ALLOWED_ORIGINS
+        value: https://arumirawan358-hash.github.io
+      - key: TRUST_PROXY
+        value: "1"
+      - key: GROQ_API_KEY
+        sync: false

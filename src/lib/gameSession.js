@@ -1,5 +1,6 @@
 import { cleanName, validateConfig, validateName } from '../data/subjects.js'
 import { generateAiQuestions } from './ai.js'
+import { generateGroqQuestions, isGroqConfigured } from './groq.js'
 import { areAnswersValid, isValidQuestion, makePracticeQuestions, scoreAnswers } from './questions.js'
 import { createPeer, makeRoomCode, makeToken, roomPeerId } from './peer.js'
 
@@ -35,10 +36,11 @@ const safeError = (error) => {
 }
 
 export class GameSession {
-  constructor({ peerFactory = createPeer, practiceFactory = makePracticeQuestions, aiFactory = generateAiQuestions, clock = () => Date.now() } = {}) {
+  constructor({ peerFactory = createPeer, practiceFactory = makePracticeQuestions, aiFactory = generateAiQuestions, groqFactory = generateGroqQuestions, clock = () => Date.now() } = {}) {
     this.peerFactory = peerFactory
     this.practiceFactory = practiceFactory
     this.aiFactory = aiFactory
+    this.groqFactory = groqFactory
     this.clock = clock
     this.state = initialState()
     this.listeners = new Set()
@@ -105,7 +107,7 @@ export class GameSession {
   }
 
   checkSetup(name, config, apiKey) {
-    return validateName(name) || validateConfig(config) || (config.source === 'ai' && !apiKey?.trim() ? 'Masukkan Gemini API key untuk membuat soal AI.' : '')
+    return validateName(name) || validateConfig(config) || (config.source === 'ai' && !apiKey?.trim() ? 'Masukkan Gemini API key untuk membuat soal AI.' : '') || (config.source === 'groq' && !isGroqConfigured() ? 'Server Groq belum ditautkan. Hubungi pengelola situs.' : '')
   }
 
   createRoom({ name, config, apiKey = '' }) {
@@ -412,7 +414,9 @@ export class GameSession {
     try {
       const questions = config.source === 'ai'
         ? await this.aiFactory(config, this.aiKey, { onProgress: progress, signal: controller.signal })
-        : this.practiceFactory(config)
+        : config.source === 'groq'
+          ? await this.groqFactory(config, { onProgress: progress, signal: controller.signal })
+          : this.practiceFactory(config)
       if (this.abortController !== controller || controller.signal.aborted) return
       if (!Array.isArray(questions) || questions.length !== config.count || !questions.every(isValidQuestion)) throw new Error('Soal yang dibuat belum lengkap. Silakan coba lagi.')
       const gameId = makeToken()

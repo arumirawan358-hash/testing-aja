@@ -106,6 +106,40 @@ describe('ruang dua pemain', () => {
     expect(guest.state.result.guest.score).toBe(100)
   })
 
+  it('prepares the same Groq questions for host and guest without requiring a player key', async () => {
+    const network = new FakeNetwork()
+    const groqFactory = async (config, { onProgress }) => {
+      onProgress(config.count, config.count)
+      return Array.from({ length: config.count }, (_, i) => ({ id: `q-${i}`, prompt: `Soal Groq ${i}`, options: ['A', 'B', 'C', 'D'], answer: 0, explanation: 'A benar.' }))
+    }
+    const host = session(network, { groqFactory }), guest = session(network)
+    const config = { ...DEFAULT_CONFIG, source: 'groq', count: 2 }
+    host.createRoom({ name: 'Bintang', config })
+    await until(() => host.state.status === 'waiting')
+    guest.joinRoom({ name: 'Mentari', code: host.state.code })
+    await until(() => host.state.connected && guest.state.connected)
+    await host.startGame()
+    await until(() => guest.state.screen === 'quiz')
+    expect(guest.state.questions).toEqual(host.state.questions)
+    expect(host.state.questions[0].prompt).toContain('Groq')
+    for (const item of host.state.questions) host.submitAnswer(item.answer)
+    for (const item of guest.state.questions) guest.submitAnswer(item.answer)
+    await until(() => guest.state.screen === 'results')
+    expect(guest.state.result.host.score).toBe(100)
+    expect(guest.state.result.guest.score).toBe(100)
+  })
+
+  it('plays a solo Groq quiz and calculates results', async () => {
+    const network = new FakeNetwork()
+    const groqFactory = async () => [{ id: 'q-1', prompt: 'Soal Groq?', options: ['A', 'B', 'C', 'D'], answer: 1, explanation: 'B benar.' }]
+    const solo = session(network, { groqFactory })
+    await solo.startSolo({ name: 'Bintang', config: { ...DEFAULT_CONFIG, source: 'groq', count: 1 } })
+    expect(solo.state.screen).toBe('quiz')
+    solo.submitAnswer(1)
+    expect(solo.state.screen).toBe('results')
+    expect(solo.state.result.host.score).toBe(100)
+  })
+
   it('keeps the AI key out of the messages sent to another player', async () => {
     const network = new FakeNetwork()
     const key = 'private-example-api-key'
