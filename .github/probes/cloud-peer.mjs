@@ -16,7 +16,7 @@ try {
     server.stderr.on('data', output)
     server.on('exit', (code) => { clearTimeout(timer); reject(new Error(`Preview exited ${code}: ${logs}`)) })
   })
-  browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] })
+  browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox'] })
   const hostContext = await browser.newContext(), guestContext = await browser.newContext()
   let hostCalls = 0, guestCalls = 0, question = 0
   const errors = []

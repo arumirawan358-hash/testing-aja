@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
@@ -16,7 +16,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm install --no-save --package-lock=false playwright@1.55.1
-      - run: npx playwright install --with-deps chromium
+      - run: google-chrome --version
       - run: npm run build
         env:
           VITE_BASE_PATH: /testing-aja/
