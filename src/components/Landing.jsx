@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { ArrowDown, ArrowRight, ArrowUpRight, BadgeCheck, BookOpen, Check, ChevronRight, CircleHelp, Copy, GraduationCap, Hash, Heart, KeyRound, Layers3, LockKeyhole, Play, Plus, ShieldCheck, Sparkles, UsersRound, WandSparkles, Zap } from 'lucide-react'
 import Brand from './Brand.jsx'
 import { CUSTOM_SUBJECT, DEFAULT_CONFIG, LEVELS, getLevel, validateConfig, validateName } from '../data/subjects.js'
-import { isGroqConfigured } from '../lib/groq.js'
+import SoundToggle from './SoundToggle.jsx'
 
 const features = [
   { icon: Layers3, title: '1–500 soal', subtitle: 'Pilih sesuai maumu', color: 'violet' },
@@ -37,10 +37,10 @@ function SetupForm({ session }) {
     setConfig({ ...config, level: levelId, grade: level.grades[0], subject: level.subjects[0] })
   }
   function start(solo = false) {
-    const message = validateName(name) || validateConfig(config) || (config.source === 'ai' && !apiKey.trim() ? 'Masukkan Gemini API key terlebih dahulu, ya.' : '') || (config.source === 'groq' && !isGroqConfigured() ? 'Server Groq belum ditautkan. Hubungi pengelola situs.' : '')
+    const message = validateName(name) || validateConfig(config) || (config.source === 'groq' && !apiKey.trim() ? 'Masukkan API key Groq terlebih dahulu, ya.' : '')
     if (message) { setError(message); return }
     setError('')
-    const data = { name, config: { ...config, count: Number(config.count), grade: Number(config.grade) }, apiKey: config.source === 'ai' ? apiKey : '' }
+    const data = { name, config: { ...config, count: Number(config.count), grade: Number(config.grade) }, apiKey: config.source === 'groq' ? apiKey : '' }
     if (solo) session.startSolo(data)
     else session.createRoom(data)
   }
@@ -88,10 +88,7 @@ function SetupForm({ session }) {
               <span className="source-icon bank-icon"><BookOpen size={18} /></span><span><strong>Bank soal</strong><small>Langsung main</small></span><span className="radio-dot" />
             </button>
             <button type="button" role="radio" aria-checked={config.source === 'groq'} className={`source-option ${config.source === 'groq' ? 'selected' : ''}`} onClick={() => setConfig({ ...config, source: 'groq' })}>
-              <span className="source-icon ai-icon"><Sparkles size={18} /></span><span><strong>Groq AI</strong><small>{isGroqConfigured() ? 'Tanpa isi kunci' : 'Belum terhubung'}</small></span><span className="radio-dot" />
-            </button>
-            <button type="button" role="radio" aria-checked={config.source === 'ai'} className={`source-option ${config.source === 'ai' ? 'selected' : ''}`} onClick={() => setConfig({ ...config, source: 'ai' })}>
-              <span className="source-icon ai-icon"><WandSparkles size={18} /></span><span><strong>Gemini AI</strong><small>Gunakan kuncimu</small></span><span className="radio-dot" />
+              <span className="source-icon ai-icon"><Sparkles size={18} /></span><span><strong>Groq AI</strong><small>Soal baru dari AI</small></span><span className="radio-dot" />
             </button>
           </div>
           {config.source === 'bank' ? (
@@ -99,11 +96,9 @@ function SetupForm({ session }) {
           ) : (
             <div className="ai-key-area">
               <label className="field"><span>Topik khusus <em>(opsional)</em></span><input value={config.topic} onChange={(event) => setConfig({ ...config, topic: event.target.value })} placeholder="Contoh: pecahan atau tata surya" maxLength={100} /></label>
-              {config.source === 'ai' ? <>
-                <label className="field"><span>Gemini API key <i>*</i></span><div className="key-input"><input type={showKey ? 'text' : 'password'} value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Masukkan API key Gemini" autoComplete="off" spellCheck="false" /><button type="button" onClick={() => setShowKey(!showKey)} aria-label={showKey ? 'Sembunyikan API key' : 'Tampilkan API key'}>{showKey ? 'Sembunyikan' : 'Lihat'}</button></div></label>
-                <p className="source-note"><LockKeyhole size={14} /> Kunci hanya tersimpan sementara di browser dan dikirim langsung ke Google, bukan ke teman. Kuota atau biaya Gemini dapat berlaku.</p>
-                <a className="text-link" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer">Dapatkan API key di Google AI Studio <ArrowUpRight size={14} /></a>
-              </> : <p className={`source-note ${isGroqConfigured() ? '' : 'warm'}`}><LockKeyhole size={14} /> {isGroqConfigured() ? 'Pemain tidak perlu memasukkan API key; kunci digunakan hanya oleh server jika sudah dikonfigurasi.' : 'Server Groq belum ditautkan oleh pengelola situs.'}</p>}
+              <label className="field"><span>API key Groq <i>*</i></span><div className="key-input"><input type={showKey ? 'text' : 'password'} value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Masukkan API key Groq" maxLength={512} autoComplete="off" spellCheck="false" /><button type="button" onClick={() => setShowKey(!showKey)} aria-label={showKey ? 'Sembunyikan API key Groq' : 'Tampilkan API key Groq'}>{showKey ? 'Sembunyikan' : 'Lihat'}</button></div></label>
+              <p className="source-note"><LockKeyhole size={14} /> Main sendiri: masukkan kuncimu. Main berdua: cukup pembuat ruang yang mengisi; teman tidak perlu. Kunci hanya sementara di browser dan dikirim langsung ke Groq, bukan ke teman atau GitHub. Kuota atau biaya Groq dapat berlaku.</p>
+              <a className="text-link" href="https://console.groq.com/keys" target="_blank" rel="noreferrer">Dapatkan API key di Groq Console <ArrowUpRight size={14} /></a>
               {Number(config.count) > 100 && <p className="source-note warm"><CircleHelp size={14} /> Soal dalam jumlah besar dibuat bertahap dan bisa memerlukan waktu serta kuota lebih banyak.</p>}
             </div>
           )}
@@ -169,7 +164,7 @@ export default function Landing({ session }) {
         <div className="container header-inner">
           <Brand onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} />
           <nav className="desktop-nav" aria-label="Navigasi utama"><a className="active" href="#beranda">Beranda</a><a href="#cara-main">Cara bermain</a><a href="#keunggulan">Keunggulan</a></nav>
-          <a href="#mulai" className="header-cta">Yuk, mulai! <ArrowUpRight size={16} /></a>
+          <div className="header-actions"><SoundToggle /><a href="#mulai" className="header-cta">Yuk, mulai! <ArrowUpRight size={16} /></a></div>
         </div>
       </header>
       <main>

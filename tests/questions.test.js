@@ -28,7 +28,7 @@ describe('bank soal dan penilaian', () => {
   })
 
   it('allows an additional subject and topic only with AI mode', () => {
-    const config = { ...DEFAULT_CONFIG, source: 'ai', subject: CUSTOM_SUBJECT, customSubject: 'Seni Budaya', topic: 'Musik tradisional' }
+    const config = { ...DEFAULT_CONFIG, source: 'groq', subject: CUSTOM_SUBJECT, customSubject: 'Seni Budaya', topic: 'Musik tradisional' }
     expect(validateConfig(config)).toBe('')
     expect(subjectName(config)).toBe('Seni Budaya')
     expect(validateConfig({ ...config, customSubject: '' })).not.toBe('')

@@ -28,7 +28,7 @@ export const DEFAULT_CONFIG = {
   customSubject: '',
   topic: '',
   count: 10,
-  source: 'bank',
+  source: 'groq',
 }
 
 export function subjectName(config) {
@@ -42,8 +42,8 @@ export function getLevel(id) {
 export function validateConfig(config) {
   const level = getLevel(config?.level)
   if (!level || !level.grades.includes(Number(config.grade))) return 'Pilih jenjang dan kelas yang sesuai.'
-  if (!['bank', 'ai', 'groq'].includes(config.source)) return 'Pilih sumber soal.'
-  if (config.subject === CUSTOM_SUBJECT && ['ai', 'groq'].includes(config.source)) {
+  if (!['bank', 'groq'].includes(config.source)) return 'Pilih sumber soal.'
+  if (config.subject === CUSTOM_SUBJECT && config.source === 'groq') {
     const custom = typeof config.customSubject === 'string' ? config.customSubject.trim() : ''
     if (custom.length < 2 || custom.length > 60) return 'Masukkan nama mata pelajaran (2–60 karakter).'
   } else if (!level.subjects.includes(config.subject)) return 'Pilih mata pelajaran yang tersedia.'

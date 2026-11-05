@@ -1,6 +1,5 @@
-import { cleanName, validateConfig, validateName } from '../data/subjects.js'
-import { generateAiQuestions } from './ai.js'
-import { generateGroqQuestions, isGroqConfigured } from './groq.js'
+import { CUSTOM_SUBJECT, cleanName, subjectName, validateConfig, validateName } from '../data/subjects.js'
+import { generateGroqQuestions } from './groq.js'
 import { areAnswersValid, isValidQuestion, makePracticeQuestions, scoreAnswers } from './questions.js'
 import { createPeer, makeRoomCode, makeToken, roomPeerId } from './peer.js'
 
@@ -21,7 +20,30 @@ const initialState = () => ({
   startedAt: null,
   result: null,
   gameId: '',
+  rematchRequested: false,
+  opponentRematchRequested: false,
 })
+
+// Only quiz settings may be sent to a guest; never forward arbitrary config fields.
+function publicConfig(config) {
+  return {
+    level: config.level,
+    grade: Number(config.grade),
+    subject: config.subject,
+    customSubject: config.subject === CUSTOM_SUBJECT ? config.customSubject.trim() : '',
+    topic: typeof config.topic === 'string' ? config.topic.trim() : '',
+    count: Number(config.count),
+    source: config.source,
+  }
+}
+
+function historyKey(config) {
+  return JSON.stringify([config.level, Number(config.grade), subjectName(config).toLocaleLowerCase('id-ID'), (config.topic || '').trim().toLocaleLowerCase('id-ID')])
+}
+
+function resetRound(status = 'joined') {
+  return { screen: 'lobby', status, error: '', questions: [], answers: [], opponentProgress: 0, preparation: null, startedAt: null, result: null, gameId: '', rematchRequested: false, opponentRematchRequested: false }
+}
 
 const safeError = (error) => {
   switch (error?.type) {
@@ -36,11 +58,12 @@ const safeError = (error) => {
 }
 
 export class GameSession {
-  constructor({ peerFactory = createPeer, practiceFactory = makePracticeQuestions, aiFactory = generateAiQuestions, groqFactory = generateGroqQuestions, clock = () => Date.now() } = {}) {
+  constructor({ peerFactory = createPeer, practiceFactory = makePracticeQuestions, groqFactory = generateGroqQuestions, clock = () => Date.now() } = {}) {
     this.peerFactory = peerFactory
     this.practiceFactory = practiceFactory
-    this.aiFactory = aiFactory
     this.groqFactory = groqFactory
+    // Recent question text is kept only in this tab to avoid repeats on rematches.
+    this.questionHistory = new Map()
     this.clock = clock
     this.state = initialState()
     this.listeners = new Set()
@@ -103,19 +126,20 @@ export class GameSession {
 
   destroy() {
     this.cleanup()
+    this.questionHistory.clear()
     this.listeners.clear()
   }
 
   checkSetup(name, config, apiKey) {
-    return validateName(name) || validateConfig(config) || (config.source === 'ai' && !apiKey?.trim() ? 'Masukkan Gemini API key untuk membuat soal AI.' : '') || (config.source === 'groq' && !isGroqConfigured() ? 'Server Groq belum ditautkan. Hubungi pengelola situs.' : '')
+    return validateName(name) || validateConfig(config) || (config.source === 'groq' && (typeof apiKey !== 'string' || !apiKey.trim()) ? 'Masukkan API key Groq untuk membuat soal AI.' : '')
   }
 
   createRoom({ name, config, apiKey = '' }) {
     const error = this.checkSetup(name, config, apiKey)
     if (error) { this.patch({ error }); return false }
     this.cleanup()
-    this.aiKey = apiKey.trim()
-    this.patch({ ...initialState(), screen: 'lobby', role: 'host', status: 'connecting', code: makeRoomCode(), selfName: cleanName(name), config: { ...config, grade: Number(config.grade), count: Number(config.count) } })
+    this.aiKey = config.source === 'groq' ? apiKey.trim() : ''
+    this.patch({ ...initialState(), screen: 'lobby', role: 'host', status: 'connecting', code: makeRoomCode(), selfName: cleanName(name), config: publicConfig(config) })
     this.openHostPeer()
     return true
   }
@@ -258,6 +282,7 @@ export class GameSession {
       status: this.state.status,
       opponentProgress: this.state.answers.length,
       gameId: this.state.gameId,
+      rematchRequested: this.state.rematchRequested,
     })
     if (this.state.screen === 'results' && this.state.result) this.send({ type: 'results', gameId: this.state.gameId, result: this.state.result })
     else if (this.state.questions.length && ['quiz', 'waiting'].includes(this.state.screen)) this.sendQuestions()
@@ -303,8 +328,26 @@ export class GameSession {
     if (message.type === 'welcome' && role === 'guest') {
       if (validateConfig(message.config) || validateName(message.name)) { this.patch({ status: 'error', error: 'Data ruang tidak valid.' }); return }
       clearTimeout(this.connectTimer)
-      this.patch({ connected: true, opponentName: cleanName(message.name), config: message.config, opponentProgress: Number.isInteger(message.opponentProgress) ? message.opponentProgress : 0, status: message.status === 'preparing' ? 'preparing' : 'joined', error: '' })
+      const returnToLobby = this.state.screen === 'results' && message.phase === 'lobby' && !message.gameId
+      this.patch({
+        ...(returnToLobby ? resetRound() : {}),
+        connected: true, opponentName: cleanName(message.name), config: publicConfig(message.config),
+        opponentProgress: Number.isInteger(message.opponentProgress) ? message.opponentProgress : 0,
+        opponentRematchRequested: !returnToLobby && message.phase === 'results' && message.gameId === this.state.gameId && message.rematchRequested === true,
+        status: message.status === 'preparing' ? 'preparing' : this.state.screen === 'results' && !returnToLobby ? 'finished' : 'joined', error: '',
+      })
       if (this.state.screen === 'waiting' && this.state.answers.length === this.state.config.count) this.sendFinished()
+      if (this.state.screen === 'results' && this.state.rematchRequested) this.send({ type: 'rematch-request', gameId: this.state.gameId })
+      return
+    }
+    if (message.type === 'rematch-request' && role !== 'solo' && this.state.screen === 'results' && message.gameId === this.state.gameId) {
+      this.patch({ opponentRematchRequested: true })
+      if (role === 'host' && this.state.rematchRequested) this.beginRematch()
+      return
+    }
+    if (message.type === 'rematch' && role === 'guest' && this.state.screen === 'results' && message.gameId === this.state.gameId) {
+      this.incoming = null
+      this.patch(resetRound())
       return
     }
     if (message.type === 'preparing' && role === 'guest') {
@@ -388,10 +431,31 @@ export class GameSession {
     const error = this.checkSetup(name, config, apiKey)
     if (error) { this.patch({ error }); return false }
     this.cleanup()
-    this.aiKey = apiKey.trim()
-    this.patch({ ...initialState(), screen: 'lobby', role: 'solo', status: 'preparing', connected: true, selfName: cleanName(name), config: { ...config, grade: Number(config.grade), count: Number(config.count) }, preparation: { done: 0, total: Number(config.count) } })
+    this.aiKey = config.source === 'groq' ? apiKey.trim() : ''
+    this.patch({ ...initialState(), screen: 'lobby', role: 'solo', status: 'preparing', connected: true, selfName: cleanName(name), config: publicConfig(config), preparation: { done: 0, total: Number(config.count) } })
     await this.prepareQuestions()
     return true
+  }
+
+  async playAgain() {
+    if (this.state.screen !== 'results') return
+    const { role, gameId, connected, config } = this.state
+    if (role === 'solo') {
+      this.patch({ ...resetRound('preparing'), preparation: { done: 0, total: config.count } })
+      await this.prepareQuestions()
+      return
+    }
+    if (!connected) { this.patch({ error: 'Teman belum terhubung. Hubungkan kembali sebelum bermain lagi.' }); return }
+    if (role === 'host' && this.state.opponentRematchRequested) { this.beginRematch(); return }
+    if (!this.send({ type: 'rematch-request', gameId })) { this.patch({ error: 'Permintaan belum terkirim. Periksa koneksi lalu coba lagi.' }); return }
+    if (this.state.screen === 'results' && this.state.gameId === gameId) this.patch({ rematchRequested: true, error: '' })
+  }
+
+  beginRematch() {
+    if (this.state.role !== 'host' || this.state.screen !== 'results' || !this.state.connected) return
+    if (!this.send({ type: 'rematch', gameId: this.state.gameId })) { this.patch({ error: 'Teman belum terhubung. Coba lagi.' }); return }
+    this.guestFinished = null
+    this.patch(resetRound())
   }
 
   async startGame() {
@@ -412,13 +476,18 @@ export class GameSession {
       if (role === 'host') this.send({ type: 'preparing', done })
     }
     try {
-      const questions = config.source === 'ai'
-        ? await this.aiFactory(config, this.aiKey, { onProgress: progress, signal: controller.signal })
-        : config.source === 'groq'
-          ? await this.groqFactory(config, { onProgress: progress, signal: controller.signal })
-          : this.practiceFactory(config)
+      const key = config.source === 'groq' ? historyKey(config) : ''
+      const previous = key ? (this.questionHistory.get(key) || []) : []
+      const questions = config.source === 'groq'
+        ? await this.groqFactory(config, this.aiKey, { onProgress: progress, signal: controller.signal, avoidPrompts: previous })
+        : this.practiceFactory(config)
       if (this.abortController !== controller || controller.signal.aborted) return
       if (!Array.isArray(questions) || questions.length !== config.count || !questions.every(isValidQuestion)) throw new Error('Soal yang dibuat belum lengkap. Silakan coba lagi.')
+      if (key) {
+        if (!this.questionHistory.has(key) && this.questionHistory.size >= 10) this.questionHistory.delete(this.questionHistory.keys().next().value)
+        this.questionHistory.delete(key)
+        this.questionHistory.set(key, [...previous, ...questions.map((question) => question.prompt)].slice(-1000))
+      }
       const gameId = makeToken()
       this.patch({ questions, answers: [], gameId, opponentProgress: 0, preparation: null })
       if (role === 'solo') {

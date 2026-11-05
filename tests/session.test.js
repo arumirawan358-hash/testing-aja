@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GameSession } from '../src/lib/gameSession.js'
 import { DEFAULT_CONFIG } from '../src/data/subjects.js'
 
@@ -55,16 +55,35 @@ async function until(predicate, timeout = 2000) {
 const sessions = []
 function session(network, extra = {}) { const s = new GameSession({ peerFactory: network.factory, ...extra }); sessions.push(s); return s }
 afterEach(() => { while (sessions.length) sessions.pop().destroy() })
+const questionsFor = (round, count) => Array.from({ length: count }, (_, i) => ({ id: `q-${i}`, prompt: `Soal ronde ${round} nomor ${i}`, options: ['A', 'B', 'C', 'D'], answer: 0, explanation: 'A benar.' }))
+const finish = (game) => { while (game.state.screen === 'quiz') game.submitAnswer(game.state.questions[game.state.answers.length].answer) }
 
 async function joinedGame(count = 3) {
   const network = new FakeNetwork()
   const host = session(network), guest = session(network)
-  const config = { ...DEFAULT_CONFIG, count }
+  const config = { ...DEFAULT_CONFIG, source: 'bank', count }
   host.createRoom({ name: 'Bintang', config })
   await until(() => host.state.status === 'waiting')
   guest.joinRoom({ name: 'Mentari', code: host.state.code })
   await until(() => host.state.connected && guest.state.connected)
   return { network, host, guest, config }
+}
+
+async function joinedGroqGame(count = 2) {
+  const network = new FakeNetwork()
+  let round = 0
+  const groqFactory = vi.fn(async (config, _key, { onProgress }) => {
+    onProgress(config.count, config.count)
+    return questionsFor(++round, config.count)
+  })
+  const host = session(network, { groqFactory }), guest = session(network)
+  const key = 'private-test-key-123'
+  const config = { ...DEFAULT_CONFIG, source: 'groq', count, topic: 'Pecahan', apiKey: key, arbitrarySecret: key }
+  host.createRoom({ name: 'Bintang', config, apiKey: key })
+  await until(() => host.state.status === 'waiting')
+  guest.joinRoom({ name: 'Mentari', code: host.state.code })
+  await until(() => host.state.connected && guest.state.connected)
+  return { network, host, guest, key, groqFactory }
 }
 
 describe('ruang dua pemain', () => {
@@ -100,58 +119,135 @@ describe('ruang dua pemain', () => {
     guest.reconnect()
     await until(() => host.state.connected && guest.state.connected && guest.state.status === 'playing')
     expect(guest.state.answers).toHaveLength(1)
-    for (const question of host.state.questions) host.submitAnswer(question.answer)
-    while (guest.state.screen === 'quiz') guest.submitAnswer(guest.state.questions[guest.state.answers.length].answer)
+    finish(host); finish(guest)
     await until(() => guest.state.screen === 'results')
     expect(guest.state.result.guest.score).toBe(100)
   })
 
-  it('prepares the same Groq questions for host and guest without requiring a player key', async () => {
+  it('requires a Groq key for a solo player or host, never for the guest', async () => {
     const network = new FakeNetwork()
-    const groqFactory = async (config, { onProgress }) => {
-      onProgress(config.count, config.count)
-      return Array.from({ length: config.count }, (_, i) => ({ id: `q-${i}`, prompt: `Soal Groq ${i}`, options: ['A', 'B', 'C', 'D'], answer: 0, explanation: 'A benar.' }))
-    }
-    const host = session(network, { groqFactory }), guest = session(network)
-    const config = { ...DEFAULT_CONFIG, source: 'groq', count: 2 }
-    host.createRoom({ name: 'Bintang', config })
-    await until(() => host.state.status === 'waiting')
-    guest.joinRoom({ name: 'Mentari', code: host.state.code })
-    await until(() => host.state.connected && guest.state.connected)
+    const solo = session(network), host = session(network)
+    expect(await solo.startSolo({ name: 'Bintang', config: DEFAULT_CONFIG })).toBe(false)
+    expect(solo.state.error).toContain('API key Groq')
+    expect(host.createRoom({ name: 'Bintang', config: DEFAULT_CONFIG })).toBe(false)
+    expect(host.state.error).toContain('API key Groq')
+    const game = await joinedGroqGame()
+    expect(game.guest.state.connected).toBe(true)
+    expect(game.guest.aiKey).toBe('')
+  })
+
+  it('prepares Groq questions once on the host and never sends the key or arbitrary fields to the guest', async () => {
+    const { network, host, guest, key, groqFactory } = await joinedGroqGame()
     await host.startGame()
     await until(() => guest.state.screen === 'quiz')
+    expect(groqFactory).toHaveBeenCalledTimes(1)
+    expect(groqFactory.mock.calls[0][1]).toBe(key)
+    expect(groqFactory.mock.calls[0][0]).toMatchObject({ source: 'groq', topic: 'Pecahan', count: 2 })
     expect(guest.state.questions).toEqual(host.state.questions)
-    expect(host.state.questions[0].prompt).toContain('Groq')
-    for (const item of host.state.questions) host.submitAnswer(item.answer)
-    for (const item of guest.state.questions) guest.submitAnswer(item.answer)
+    expect(JSON.stringify(network.messages)).not.toContain(key)
+    expect(JSON.stringify(host.state)).not.toContain(key)
+    expect(JSON.stringify(guest.state)).not.toContain(key)
+    expect(guest.state.config).not.toHaveProperty('apiKey')
+    expect(guest.state.config).not.toHaveProperty('arbitrarySecret')
+    finish(host); finish(guest)
     await until(() => guest.state.screen === 'results')
     expect(guest.state.result.host.score).toBe(100)
     expect(guest.state.result.guest.score).toBe(100)
+    host.quit()
+    expect(host.aiKey).toBe('')
   })
 
-  it('plays a solo Groq quiz and calculates results', async () => {
-    const network = new FakeNetwork()
-    const groqFactory = async () => [{ id: 'q-1', prompt: 'Soal Groq?', options: ['A', 'B', 'C', 'D'], answer: 1, explanation: 'B benar.' }]
-    const solo = session(network, { groqFactory })
-    await solo.startSolo({ name: 'Bintang', config: { ...DEFAULT_CONFIG, source: 'groq', count: 1 } })
-    expect(solo.state.screen).toBe('quiz')
-    solo.submitAnswer(1)
-    expect(solo.state.screen).toBe('results')
-    expect(solo.state.result.host.score).toBe(100)
-  })
-
-  it('keeps the AI key out of the messages sent to another player', async () => {
-    const network = new FakeNetwork()
-    const key = 'private-example-api-key'
-    const host = session(network, { aiFactory: async (config) => Array.from({ length: config.count }, (_, i) => ({ id: `q-${i}`, prompt: `Soal ${i}`, options: ['A', 'B', 'C', 'D'], answer: 0, explanation: 'A benar.' })) })
-    const guest = session(network)
-    host.createRoom({ name: 'Bintang', config: { ...DEFAULT_CONFIG, source: 'ai', count: 2 }, apiKey: key })
-    await until(() => host.state.status === 'waiting')
-    guest.joinRoom({ name: 'Mentari', code: host.state.code })
-    await until(() => host.state.connected && guest.state.connected)
+  it('waits for both players to agree on a rematch and avoids the previous round', async () => {
+    const { host, guest, key, groqFactory } = await joinedGroqGame()
+    await host.startGame()
+    await until(() => host.state.screen === 'quiz' && guest.state.screen === 'quiz')
+    const oldPrompts = host.state.questions.map((item) => item.prompt)
+    finish(host); finish(guest)
+    await until(() => host.state.screen === 'results' && guest.state.screen === 'results')
+    await host.playAgain()
+    await until(() => guest.state.opponentRematchRequested)
+    expect(host.state.screen).toBe('results')
+    expect(guest.state.screen).toBe('results') // The guest can finish reading the review first.
+    await guest.playAgain()
+    await until(() => host.state.screen === 'lobby' && guest.state.screen === 'lobby')
+    expect(host.state.connected && guest.state.connected).toBe(true)
+    expect(host.aiKey).toBe(key)
     await host.startGame()
     await until(() => guest.state.screen === 'quiz')
-    expect(JSON.stringify(network.messages)).not.toContain(key)
-    expect(JSON.stringify(host.state)).not.toContain(key)
+    expect(groqFactory.mock.calls[1][2].avoidPrompts).toEqual(oldPrompts)
+    expect(host.state.questions.map((item) => item.prompt)).not.toEqual(oldPrompts)
+    expect(guest.state.questions).toEqual(host.state.questions)
+  })
+
+  it('also supports a guest-first rematch request', async () => {
+    const { host, guest } = await joinedGame(1)
+    await host.startGame()
+    await until(() => guest.state.screen === 'quiz')
+    finish(host); finish(guest)
+    await until(() => guest.state.screen === 'results')
+    await guest.playAgain()
+    await until(() => host.state.opponentRematchRequested)
+    expect(guest.state.rematchRequested).toBe(true)
+    await host.playAgain()
+    await until(() => host.state.screen === 'lobby' && guest.state.screen === 'lobby')
+    expect(host.state.rematchRequested).toBe(false)
+    expect(guest.state.rematchRequested).toBe(false)
+  })
+
+  it('preserves rematch readiness when a guest reconnects on the results screen', async () => {
+    const { host, guest } = await joinedGame(1)
+    await host.startGame()
+    await until(() => guest.state.screen === 'quiz')
+    finish(host); finish(guest)
+    await until(() => guest.state.screen === 'results')
+    await host.playAgain()
+    await until(() => guest.state.opponentRematchRequested)
+    guest.connection.close()
+    await until(() => !host.state.connected && !guest.state.connected)
+    guest.reconnect()
+    await until(() => host.state.connected && guest.state.connected && guest.state.opponentRematchRequested)
+    await guest.playAgain()
+    await until(() => host.state.screen === 'lobby' && guest.state.screen === 'lobby')
+  })
+})
+
+describe('solo dan riwayat variasi', () => {
+  it('replays with the same settings and key, and keeps recent prompts only in memory', async () => {
+    const network = new FakeNetwork()
+    let round = 0
+    const groqFactory = vi.fn(async (config) => questionsFor(++round, config.count))
+    const solo = session(network, { groqFactory })
+    const key = 'solo-private-test-key'
+    const config = { ...DEFAULT_CONFIG, source: 'groq', count: 1, topic: 'Pecahan' }
+    await solo.startSolo({ name: 'Bintang', config, apiKey: key })
+    const oldPrompt = solo.state.questions[0].prompt
+    finish(solo)
+    expect(solo.state.result.host.score).toBe(100)
+    await solo.playAgain()
+    expect(solo.state.screen).toBe('quiz')
+    expect(solo.state.questions[0].prompt).not.toBe(oldPrompt)
+    expect(groqFactory.mock.calls[1][0]).toMatchObject({ level: 'SD', grade: 4, topic: 'Pecahan', count: 1 })
+    expect(groqFactory.mock.calls[1][1]).toBe(key)
+    expect(groqFactory.mock.calls[1][2].avoidPrompts).toEqual([oldPrompt])
+    expect(JSON.stringify(solo.state)).not.toContain(key)
+    solo.quit()
+    expect(solo.aiKey).toBe('')
+    await solo.startSolo({ name: 'Bintang', config: { ...config, topic: 'Luas' }, apiKey: key })
+    expect(groqFactory.mock.calls[2][2].avoidPrompts).toEqual([])
+    solo.destroy()
+    expect(solo.questionHistory.size).toBe(0)
+    expect(solo.aiKey).toBe('')
+  })
+
+  it('aborts preparation and clears the key if the player leaves', async () => {
+    const network = new FakeNetwork()
+    const groqFactory = (_config, _key, { signal }) => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError'))))
+    const solo = session(network, { groqFactory })
+    const preparation = solo.startSolo({ name: 'Bintang', config: { ...DEFAULT_CONFIG, count: 1 }, apiKey: 'test-key' })
+    expect(solo.state.status).toBe('preparing')
+    solo.quit()
+    await preparation
+    expect(solo.state.screen).toBe('home')
+    expect(solo.aiKey).toBe('')
   })
 })
