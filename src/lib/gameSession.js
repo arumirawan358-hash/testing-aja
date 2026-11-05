@@ -7,6 +7,9 @@ import { decodeQuestions, encodeQuestions, isValidChunkText, isValidTransferSize
 const TRANSFER_IDLE_MS = 45000
 const MAX_TRANSFER_ATTEMPTS = 3
 const MAX_BUFFERED_BYTES = 256 * 1024
+const CONNECT_TIMEOUT_MS = 20000
+const RECONNECT_BASE_MS = 1500
+const FINISHED_RETRY_MS = 5000
 
 const initialState = () => ({
   screen: 'home',
@@ -18,6 +21,7 @@ const initialState = () => ({
   opponentName: '',
   config: null,
   connected: false,
+  roomClosed: false,
   questions: [],
   answers: [],
   opponentProgress: 0,
@@ -47,7 +51,7 @@ function historyKey(config) {
 }
 
 function resetRound(status = 'joined') {
-  return { screen: 'lobby', status, error: '', questions: [], answers: [], opponentProgress: 0, preparation: null, startedAt: null, result: null, gameId: '', rematchRequested: false, opponentRematchRequested: false }
+  return { screen: 'lobby', status, error: '', roomClosed: false, questions: [], answers: [], opponentProgress: 0, preparation: null, startedAt: null, result: null, gameId: '', rematchRequested: false, opponentRematchRequested: false }
 }
 
 const safeError = (error) => {
@@ -63,7 +67,7 @@ const safeError = (error) => {
 }
 
 export class GameSession {
-  constructor({ peerFactory = createPeer, practiceFactory = makePracticeQuestions, groqFactory = generateGroqQuestions, clock = () => Date.now(), transferIdleMs = TRANSFER_IDLE_MS, maxTransferAttempts = MAX_TRANSFER_ATTEMPTS } = {}) {
+  constructor({ peerFactory = createPeer, practiceFactory = makePracticeQuestions, groqFactory = generateGroqQuestions, clock = () => Date.now(), transferIdleMs = TRANSFER_IDLE_MS, maxTransferAttempts = MAX_TRANSFER_ATTEMPTS, connectTimeoutMs = CONNECT_TIMEOUT_MS, reconnectBaseMs = RECONNECT_BASE_MS, finishedRetryMs = FINISHED_RETRY_MS } = {}) {
     this.peerFactory = peerFactory
     this.practiceFactory = practiceFactory
     this.groqFactory = groqFactory
@@ -78,6 +82,14 @@ export class GameSession {
     this.abortController = null
     this.connectTimer = null
     this.readyTimer = null
+    this.reconnectTimer = null
+    this.signalTimer = null
+    this.finishedRetryTimer = null
+    this.reconnectAttempts = 0
+    this.signalAttempts = 0
+    this.connectTimeoutMs = connectTimeoutMs
+    this.reconnectBaseMs = reconnectBaseMs
+    this.finishedRetryMs = finishedRetryMs
     this.aiKey = ''
     this.selfToken = ''
     this.guestToken = ''
@@ -102,14 +114,39 @@ export class GameSession {
   clearTimers() {
     clearTimeout(this.connectTimer)
     clearTimeout(this.readyTimer)
+    clearTimeout(this.reconnectTimer)
+    clearTimeout(this.signalTimer)
+    clearTimeout(this.finishedRetryTimer)
     this.connectTimer = null
     this.readyTimer = null
+    this.reconnectTimer = null
+    this.signalTimer = null
+    this.finishedRetryTimer = null
+    this.reconnectAttempts = 0
+    this.signalAttempts = 0
   }
 
   cancelTransfer() {
     this.activeTransfer = null
     clearTimeout(this.readyTimer)
     this.readyTimer = null
+  }
+
+  signalingRestored() {
+    clearTimeout(this.signalTimer)
+    this.signalTimer = null
+    this.signalAttempts = 0
+  }
+
+  scheduleSignalingReconnect(peer) {
+    if (this.peer !== peer || peer.destroyed || this.state.roomClosed || this.signalTimer) return
+    const delay = Math.min(this.reconnectBaseMs * 2 ** Math.min(this.signalAttempts, 5), 30000)
+    this.signalAttempts += 1
+    this.signalTimer = setTimeout(() => {
+      this.signalTimer = null
+      if (this.peer !== peer || peer.destroyed || this.state.roomClosed || !peer.disconnected) return
+      try { peer.reconnect() } catch { this.scheduleSignalingReconnect(peer) }
+    }, delay)
   }
 
   cleanup() {
@@ -173,25 +210,31 @@ export class GameSession {
     }, 20000)
     peer.on('open', () => {
       if (this.peer !== peer) return
+      this.signalingRestored()
       clearTimeout(this.connectTimer)
-      this.patch({ status: 'waiting', error: '' })
+      // PeerServer can reconnect while an existing WebRTC game is still active.
+      // Do not reset the lobby/game state just because signaling came back.
+      if (this.state.screen === 'lobby' && ['connecting', 'error'].includes(this.state.status) && !this.state.roomClosed) this.patch({ status: 'waiting', error: '' })
     })
     peer.on('connection', (connection) => {
       if (this.peer === peer) this.acceptCandidate(connection)
     })
-    peer.on('disconnected', () => {
-      if (this.peer === peer && !peer.destroyed) { try { peer.reconnect() } catch { /* show connection state if needed */ } }
-    })
+    peer.on('disconnected', () => this.scheduleSignalingReconnect(peer))
     peer.on('error', (error) => {
       if (this.peer !== peer) return
-      if (error.type === 'unavailable-id' && this.hostAttempts < 5) {
+      if (error.type === 'unavailable-id' && this.hostAttempts < 5 && !this.state.gameId && !this.guestToken && this.state.status === 'connecting') {
         this.peer = null
         try { peer.destroy() } catch { /* no-op */ }
         this.patch({ code: makeRoomCode(), status: 'connecting' })
         this.openHostPeer()
         return
       }
-      if (!this.state.connected) { clearTimeout(this.connectTimer); this.patch({ status: 'error', error: safeError(error) }) }
+      if (!this.state.connected) {
+        clearTimeout(this.connectTimer)
+        const inGame = ['quiz', 'waiting', 'results'].includes(this.state.screen)
+        const keepStatus = inGame || this.state.status === 'preparing'
+        this.patch({ ...(keepStatus ? {} : { status: 'error' }), error: safeError(error) + (inGame && this.state.screen !== 'results' ? ' Kamu tetap bisa menjawab; jangan tutup atau muat ulang tab.' : '') })
+      }
     })
   }
 
@@ -202,32 +245,82 @@ export class GameSession {
     this.cleanup()
     this.selfToken = makeToken()
     this.patch({ ...initialState(), screen: 'lobby', role: 'guest', status: 'connecting', code: normalizedCode, selfName: cleanName(name) })
+    return this.openGuestPeer()
+  }
+
+  isGuestInRound() {
+    return this.state.role === 'guest' && Boolean(this.state.gameId) && ['quiz', 'waiting', 'results'].includes(this.state.screen)
+  }
+
+  canRetryConnection() {
+    return this.isGuestInRound() || (this.state.role === 'guest' && this.state.screen === 'lobby' && Boolean(this.state.config))
+  }
+
+  scheduleReconnect() {
+    if (!this.canRetryConnection() || this.state.roomClosed || this.state.connected || this.reconnectTimer) return
+    const delay = Math.min(this.reconnectBaseMs * 2 ** Math.min(this.reconnectAttempts, 5), 30000)
+    this.reconnectAttempts += 1
+    this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this.reconnect() }, delay)
+  }
+
+  discardGuestPeer(peer) {
+    if (this.peer !== peer) return
+    this.peer = null
+    clearTimeout(this.signalTimer)
+    this.signalTimer = null
+    try { peer.destroy() } catch { /* already destroyed */ }
+  }
+
+  connectionFailed(message) {
+    clearTimeout(this.connectTimer)
+    const connection = this.connection
+    this.connection = null
+    try { connection?.close() } catch { /* already closed */ }
+    if (this.state.roomClosed) return
+    const retry = this.canRetryConnection()
+    const detail = this.isGuestInRound() ? ' Kamu tetap bisa lanjut; jawaban tersimpan sementara. Jangan tutup atau muat ulang tab.' : retry ? ' Mencoba menghubungkan kembali.' : ''
+    this.patch({ connected: false, status: retry ? 'disconnected' : 'error', error: message + detail })
+    if (retry) this.scheduleReconnect()
+  }
+
+  openGuestPeer() {
     let peer
-    try { peer = this.peerFactory() } catch { this.patch({ status: 'error', error: 'Browser tidak dapat membuat koneksi. Coba browser terbaru.' }); return false }
+    try { peer = this.peerFactory() } catch { this.connectionFailed('Browser tidak dapat membuat koneksi. Coba browser terbaru.'); return false }
     this.peer = peer
+    clearTimeout(this.connectTimer)
     this.connectTimer = setTimeout(() => {
-      if (this.peer === peer && !this.state.connected) this.patch({ status: 'error', error: 'Koneksi terlalu lama. Periksa kode ruang dan internet, lalu coba lagi.' })
-    }, 20000)
-    peer.on('open', () => { if (this.peer === peer) this.connectToHost() })
-    peer.on('disconnected', () => { if (this.peer === peer && !peer.destroyed) { try { peer.reconnect() } catch { /* no-op */ } } })
-    peer.on('error', (peerError) => {
+      if (this.peer === peer && !this.state.connected) {
+        if (!peer.open && !this.connection) this.discardGuestPeer(peer)
+        this.connectionFailed('Koneksi terlalu lama. Periksa kode ruang dan internet, lalu coba lagi.')
+      }
+    }, this.connectTimeoutMs)
+    peer.on('open', () => {
       if (this.peer !== peer) return
-      if (!this.state.connected) { clearTimeout(this.connectTimer); this.patch({ status: 'error', error: safeError(peerError) }) }
+      this.signalingRestored()
+      // The signaling socket may reopen without the data channel closing.
+      if (!this.state.connected && !this.connection && !this.state.roomClosed) this.connectToHost()
+    })
+    peer.on('disconnected', () => this.scheduleSignalingReconnect(peer))
+    peer.on('error', (peerError) => {
+      if (this.peer === peer && !this.state.connected) this.connectionFailed(safeError(peerError))
     })
     return true
   }
 
   connectToHost() {
-    if (!this.peer || this.peer.destroyed) { this.patch({ status: 'error', error: 'Koneksi sudah ditutup. Kembali dan gabung lagi.' }); return }
-    this.patch({ status: 'connecting', error: '' })
+    const peer = this.peer
+    if (!peer || peer.destroyed) { this.connectionFailed('Koneksi sudah ditutup. Coba hubungkan kembali.'); return }
+    this.patch({ status: 'connecting', error: this.isGuestInRound() ? 'Sedang menghubungkan kembali. Kamu tetap bisa menjawab; jangan tutup atau muat ulang tab.' : '' })
     let connection
-    try { connection = this.peer.connect(roomPeerId(this.state.code), { reliable: true, serialization: 'json' }) } catch { this.patch({ status: 'error', error: 'Tidak dapat terhubung ke ruang. Coba lagi.' }); return }
+    try { connection = peer.connect(roomPeerId(this.state.code), { reliable: true, serialization: 'json' }) } catch { this.connectionFailed('Tidak dapat terhubung ke ruang. Coba lagi.'); return }
+    // PeerJS returns undefined rather than throwing if signaling is disconnected.
+    if (!connection) { this.connectionFailed('Server penghubung belum siap.'); return }
     this.connection = connection
     this.wireConnection(connection, 'guest')
     clearTimeout(this.connectTimer)
     this.connectTimer = setTimeout(() => {
-      if (this.connection === connection && !this.state.connected) this.patch({ status: 'error', error: 'Koneksi terlalu lama. Pastikan kode benar dan pembuat ruang masih online.' })
-    }, 20000)
+      if (this.connection === connection && !this.state.connected) this.connectionFailed('Koneksi terlalu lama. Pastikan kode benar dan pembuat ruang masih online.')
+    }, this.connectTimeoutMs)
     connection.on('open', () => {
       if (this.connection !== connection) return
       this.send({ type: 'join', name: this.state.selfName, token: this.selfToken, protocol: TRANSFER_PROTOCOL })
@@ -235,11 +328,35 @@ export class GameSession {
   }
 
   reconnect() {
-    if (this.state.role !== 'guest' || this.state.connected) return
-    try { this.connection?.close() } catch { /* no-op */ }
+    if (this.state.role !== 'guest' || this.state.connected || this.state.roomClosed || this.state.status === 'connecting') return
+    clearTimeout(this.reconnectTimer)
+    this.reconnectTimer = null
+    const connection = this.connection
     this.connection = null
-    if (this.peer?.disconnected && !this.peer.destroyed) {
-      try { this.peer.reconnect() } catch { /* connect attempt below will explain failure */ }
+    try { connection?.close() } catch { /* no-op */ }
+    const message = this.isGuestInRound() ? 'Sedang menghubungkan kembali. Jawaban tersimpan sementara; jangan tutup atau muat ulang tab.' : 'Sedang menghubungkan kembali ke ruang.'
+    if (!this.peer || this.peer.destroyed) {
+      this.patch({ status: 'connecting', error: message })
+      this.openGuestPeer()
+      return
+    }
+    // Wait for the signaling server's open event before calling connect().
+    if (this.peer.disconnected || this.peer.open === false) {
+      const peer = this.peer
+      this.patch({ status: 'connecting', error: message })
+      clearTimeout(this.connectTimer)
+      this.connectTimer = setTimeout(() => {
+        if (this.peer === peer && !this.state.connected && !this.connection) {
+          this.discardGuestPeer(peer)
+          this.connectionFailed('Server penghubung belum merespons.')
+        }
+      }, this.connectTimeoutMs)
+      if (peer.disconnected) {
+        clearTimeout(this.signalTimer)
+        this.signalTimer = null
+        try { peer.reconnect() } catch { this.connectionFailed('Server penghubung belum siap.'); this.scheduleSignalingReconnect(peer) }
+      }
+      return
     }
     this.connectToHost()
   }
@@ -316,6 +433,8 @@ export class GameSession {
     if (connection !== this.connection) return
     this.connection = null
     clearTimeout(this.connectTimer)
+    clearTimeout(this.finishedRetryTimer)
+    this.finishedRetryTimer = null
     this.cancelTransfer()
     this.incoming = null
     try { connection.close() } catch { /* already closed */ }
@@ -336,7 +455,15 @@ export class GameSession {
         this.patch({ connected: false, opponentName: '', status: 'waiting', preparation: null, error: 'Teman terputus. Bagikan kode lagi untuk mengundangnya kembali.' })
       }
     } else {
-      this.patch({ connected: false, status: inLobby ? 'disconnected' : this.state.status, preparation: inLobby ? null : this.state.preparation, error: this.state.role === 'guest' ? 'Koneksi terputus. Hubungkan kembali untuk melanjutkan.' : 'Teman terputus. Minta teman menghubungkan kembali sebelum melanjutkan.' })
+      const error = inLobby
+        ? 'Koneksi terputus. Hubungkan kembali untuk melanjutkan.'
+        : this.state.screen === 'results'
+          ? 'Koneksi terputus. Hasil tetap ada di tab ini; hubungkan kembali untuk bermain lagi.'
+          : this.state.role === 'guest'
+            ? 'Koneksi terputus. Kamu tetap bisa lanjut; jawaban tersimpan sementara. Jangan tutup atau muat ulang tab.'
+            : 'Teman terputus. Kamu tetap bisa lanjut; hasil bersama perlu koneksi kembali. Jangan tutup atau muat ulang tab.'
+      this.patch({ connected: false, status: inLobby || this.state.role === 'guest' ? 'disconnected' : this.state.status, preparation: inLobby ? null : this.state.preparation, error })
+      if (this.state.role === 'guest') this.scheduleReconnect()
     }
   }
 
@@ -354,16 +481,30 @@ export class GameSession {
     const role = this.state.role
     if (message.type === 'rejected' && role === 'guest') {
       clearTimeout(this.connectTimer)
-      this.patch({ status: 'error', connected: false, error: typeof message.reason === 'string' ? message.reason.slice(0, 180) : 'Tidak dapat bergabung ke ruang.' })
+      const reason = typeof message.reason === 'string' ? message.reason.slice(0, 180) : 'Tidak dapat bergabung ke ruang.'
+      // The host may not yet have noticed that this player's old channel closed.
+      if (this.canRetryConnection() && /penuh/i.test(reason)) this.connectionFailed('Ruang masih memperbarui koneksi. Mencoba lagi.')
+      else this.patch({ status: 'error', connected: false, error: reason })
       return
     }
     if (message.type === 'room-closed') {
-      this.patch({ connected: false, status: 'error', error: 'Pemain lain meninggalkan ruang. Kembali ke beranda untuk bermain lagi.' })
+      clearTimeout(this.connectTimer)
+      clearTimeout(this.reconnectTimer)
+      clearTimeout(this.signalTimer)
+      clearTimeout(this.finishedRetryTimer)
+      this.reconnectTimer = null
+      this.signalTimer = null
+      this.finishedRetryTimer = null
+      const inGame = ['quiz', 'waiting', 'results'].includes(this.state.screen)
+      this.patch({ connected: false, status: 'error', roomClosed: true, error: inGame ? 'Pemain lain meninggalkan ruang. Kamu masih bisa menjawab, tetapi hasil bersama tidak dapat dikirim.' : 'Pemain lain meninggalkan ruang. Kembali ke beranda untuk bermain lagi.' })
       return
     }
     if (message.type === 'welcome' && role === 'guest') {
       if (validateConfig(message.config) || validateName(message.name)) { this.patch({ status: 'error', error: 'Data ruang tidak valid.' }); return }
       clearTimeout(this.connectTimer)
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+      this.reconnectAttempts = 0
       const returnToLobby = this.state.screen === 'results' && message.phase === 'lobby' && !message.gameId
       this.patch({
         ...(returnToLobby ? resetRound() : {}),
@@ -372,7 +513,10 @@ export class GameSession {
         opponentRematchRequested: !returnToLobby && message.phase === 'results' && message.gameId === this.state.gameId && message.rematchRequested === true,
         status: message.status === 'preparing' ? 'preparing' : this.state.screen === 'results' && !returnToLobby ? 'finished' : 'joined', error: '',
       })
-      if (this.state.screen === 'waiting' && this.state.answers.length === this.state.config.count) this.sendFinished()
+      if (message.gameId && message.gameId === this.state.gameId && ['quiz', 'waiting'].includes(this.state.screen)) {
+        this.send({ type: 'progress', gameId: this.state.gameId, count: this.state.answers.length })
+        if (this.state.screen === 'waiting' && this.state.answers.length === this.state.config.count) this.sendFinished()
+      }
       if (this.state.screen === 'results' && this.state.rematchRequested) this.send({ type: 'rematch-request', gameId: this.state.gameId })
       return
     }
@@ -512,6 +656,8 @@ export class GameSession {
       return
     }
     if (message.type === 'results' && role === 'guest' && message.gameId === this.state.gameId && message.result?.host && message.result?.guest) {
+      clearTimeout(this.finishedRetryTimer)
+      this.finishedRetryTimer = null
       this.patch({ screen: 'results', status: 'finished', result: message.result, error: '' })
     }
   }
@@ -680,14 +826,18 @@ export class GameSession {
     if (!send({ type: 'game-loaded', gameId, transferId: transfer.transferId }) && active()) this.retryTransfer(transfer)
   }
 
-  submitAnswer(answer) {
-    const { screen, role, connected, questions, answers } = this.state
-    if (screen !== 'quiz' || (role !== 'solo' && !connected) || answers.length >= questions.length) return
-    if (answer !== null && (!Number.isInteger(answer) || answer < 0 || answer > 3)) return
+  submitAnswer(answer, question = null) {
+    const { screen, role, connected, questions, answers, gameId } = this.state
+    if (screen !== 'quiz' || answers.length >= questions.length) return false
+    // Ignore a second tap for a question that was already submitted.
+    if (question && (question.gameId !== gameId || question.index !== answers.length)) return false
+    if (answer !== null && (!Number.isInteger(answer) || answer < 0 || answer > 3)) return false
     const next = [...answers, answer]
-    this.patch({ answers: next, error: '' })
-    if (role !== 'solo') this.send({ type: 'progress', gameId: this.state.gameId, count: next.length })
-    if (next.length !== questions.length) return
+    // Both players already have the full verified quiz. Keep answering locally
+    // during a temporary outage and synchronize progress when they reconnect.
+    this.patch({ answers: next, ...(connected ? { error: '' } : {}) })
+    if (role !== 'solo') this.send({ type: 'progress', gameId, count: next.length })
+    if (next.length !== questions.length) return true
     this.elapsedMs = Math.max(0, this.clock() - this.state.startedAt)
     if (role === 'solo') {
       this.patch({ screen: 'results', status: 'finished', result: { host: { name: this.state.selfName, ...scoreAnswers(questions, next), elapsedMs: this.elapsedMs }, guest: null } })
@@ -696,10 +846,16 @@ export class GameSession {
       if (role === 'guest') this.sendFinished()
       else this.maybeFinish()
     }
+    return true
   }
 
   sendFinished() {
+    clearTimeout(this.finishedRetryTimer)
+    this.finishedRetryTimer = null
+    if (this.state.role !== 'guest' || this.state.screen !== 'waiting' || this.state.roomClosed || !this.state.connected) return
     this.send({ type: 'finished', gameId: this.state.gameId, answers: this.state.answers, elapsedMs: this.elapsedMs })
+    // Retry idempotently until results arrive; this also recovers a lost result.
+    this.finishedRetryTimer = setTimeout(() => this.sendFinished(), this.finishedRetryMs)
   }
 
   maybeFinish() {

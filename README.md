@@ -9,7 +9,7 @@ Kuis belajar SD, SMP, dan SMA: bermain sendiri atau berdua jarak jauh, dengan **
 1. Buka KuisKita dan isi nama, jenjang, kelas, mata pelajaran, jumlah soal, dan jika perlu topik khusus. Untuk pelajaran lain, pilih **Lainnya (khusus AI)**.
 2. **Groq AI** dipilih secara awal. Untuk membuat soal AI, pemain solo atau pembuat ruang memasukkan API key miliknya di formulir. Buat key di [Groq Console](https://console.groq.com/keys); jangan kirim key lewat chat atau simpan di repository.
 3. Pilih **Latihan sendiri** atau **Buat ruang**. Jika berdua, bagikan kode/tautan kepada teman. Teman hanya mengisi nama dan kode ruang—**tidak perlu API key**. Setelah teman bergabung, pembuat ruang menekan **Mulai permainan**.
-4. Jawab atau lewati setiap soal. Dalam permainan berdua, hasil dan pembahasan muncul setelah kedua pemain selesai.
+4. Jawab atau lewati setiap soal. Dalam permainan berdua, hasil dan pembahasan muncul setelah kedua pemain selesai. Jika koneksi terputus setelah soal dimulai, kedua pemain tetap dapat menjawab; aplikasi mencoba menyambung kembali dan menyinkronkan progres serta hasil. Jawaban hanya tersimpan sementara di tab: **jangan tutup atau muat ulang halaman**. Hasil bersama memerlukan kedua pemain tetap berada di ruang dan koneksi kembali.
 5. Pada hasil, pilih **Main lagi** untuk soal baru dengan pengaturan yang sama. Untuk permainan berdua, kedua pemain dapat membaca pembahasan dahulu dan masing-masing memilih **Main lagi**; mereka kembali ke ruang dan pembuat ruang memulai ronde berikutnya. Kunci tidak perlu dimasukkan ulang selama tetap di ruang yang sama.
 
 Pilih **Bank soal** bila ingin mencoba tanpa API key. Bank soal non-matematika jumlahnya terbatas dan bisa berulang, terutama saat meminta banyak soal.
