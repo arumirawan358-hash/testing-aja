@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, BookOpen, Check, ChevronRight, CircleHelp, GraduationCap, Lightbulb, LockKeyhole, Settings2, Sparkles, Trophy, UserRound, UsersRound, Volume2, X } from 'lucide-react'
+import { ArrowLeft, BookOpen, Check, ChevronRight, CircleHelp, GraduationCap, LockKeyhole, Settings2, Sparkles, Trophy, UserRound, UsersRound, Volume2, X } from 'lucide-react'
 import { useSound } from './SoundContext.jsx'
 
 function Switch({ label, checked, onChange, silent = false }) {
@@ -36,12 +36,11 @@ function SettingsView({ hintEnabled, setHintEnabled, openPanel }) {
     <p className="panel-description">Atur pengalaman belajar sesuai keinginanmu.</p>
     <div className="settings-list">
       <div className="preference-row"><span className="preference-icon purple"><Volume2 size={20} /></span><div className="preference-text"><strong>Efek suara</strong><span>Suara saat bermain dan menekan tombol.</span></div><Switch label="Efek suara" checked={sound.enabled} onChange={sound.toggle} silent /></div>
-      <button type="button" className="preference-row about-link" onClick={() => openPanel('about')}><span className="preference-icon mint"><CircleHelp size={20} /></span><span className="preference-text"><strong>Tentang web</strong><span>Kenali KuisKita dan cara bermainnya.</span></span><ChevronRight size={20} /></button>
+      <div className="preference-row about-preference">
+        <button type="button" className="about-info-link" onClick={() => openPanel('about')} aria-label="Buka tentang web"><span className="preference-icon mint"><CircleHelp size={20} /></span><span className="preference-text"><strong>Tentang web</strong><span>Kenali KuisKita dan cara bermainnya.</span></span><ChevronRight size={20} aria-hidden="true" /></button>
+        <Switch label="Tentang web" checked={hintEnabled} onChange={() => setHintEnabled((current) => !current)} />
+      </div>
     </div>
-    <section className="hint-setting" aria-labelledby="hint-setting-title">
-      <div className="hint-setting-top"><span className="preference-icon yellow"><Lightbulb size={21} /></span><div className="preference-text"><strong id="hint-setting-title">Hint jawaban</strong><span>Tampilkan jawaban pada setiap soal.</span></div><Switch label="Hint jawaban" checked={hintEnabled} onChange={() => setHintEnabled((current) => !current)} /></div>
-      <p>Hint hanya muncul jika diaktifkan dan berlaku di browser ini, termasuk saat main berdua. Nilai tetap dihitung; sepakati penggunaannya dengan teman agar adil.</p>
-    </section>
   </div>
 }
 

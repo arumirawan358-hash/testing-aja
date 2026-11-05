@@ -9,7 +9,14 @@ class FakeConnection extends EventEmitter {
     if (!this.open || !this.other?.open) throw new Error('closed')
     const copy = structuredClone(message)
     this.network.messages.push(copy)
-    queueMicrotask(() => { if (this.other.open) this.other.emit('data', copy) })
+    // Match PeerJS's JSON serialization limit, which emits an error rather than throwing.
+    if (new TextEncoder().encode(JSON.stringify(copy)).length >= this.network.maxMessageBytes) {
+      this.emit('error', { type: 'message-too-big' })
+      return
+    }
+    if (this.network.drop(copy)) return
+    const delivered = this.network.mutate(copy)
+    queueMicrotask(() => { if (this.other.open) this.other.emit('data', delivered) })
   }
   close() {
     if (!this.open) return
@@ -42,7 +49,7 @@ class FakePeer extends EventEmitter {
   destroy() { this.destroyed = true; this.network.peers.delete(this.id) }
 }
 class FakeNetwork {
-  constructor() { this.peers = new Map(); this.counter = 0; this.messages = [] }
+  constructor() { this.peers = new Map(); this.counter = 0; this.messages = []; this.maxMessageBytes = 16300; this.drop = () => false; this.mutate = (message) => message }
   factory = (id) => new FakePeer(this, id)
 }
 async function until(predicate, timeout = 2000) {
@@ -69,14 +76,14 @@ async function joinedGame(count = 3) {
   return { network, host, guest, config }
 }
 
-async function joinedGroqGame(count = 2) {
-  const network = new FakeNetwork()
+async function joinedGroqGame(count = 2, options = {}) {
+  const network = options.network || new FakeNetwork()
   let round = 0
-  const groqFactory = vi.fn(async (config, _key, { onProgress }) => {
+  const groqFactory = options.groqFactory || vi.fn(async (config, _key, { onProgress }) => {
     onProgress(config.count, config.count)
     return questionsFor(++round, config.count)
   })
-  const host = session(network, { groqFactory }), guest = session(network)
+  const host = session(network, { ...options.sessionOptions, groqFactory }), guest = session(network)
   const key = 'private-test-key-123'
   const config = { ...DEFAULT_CONFIG, source: 'groq', count, topic: 'Pecahan', apiKey: key, arbitrarySecret: key }
   host.createRoom({ name: 'Bintang', config, apiKey: key })
@@ -98,6 +105,221 @@ describe('ruang dua pemain', () => {
     expect(host.state.result.host.score).toBe(100)
     expect(guest.state.result.guest.score).toBe(0)
     expect(guest.state.result).toEqual(host.state.result)
+  })
+
+  it('sends 500 long Unicode questions as small messages, even if one question exceeds the PeerJS limit', async () => {
+    const longQuestions = questionsFor(1, 500).map((question) => ({
+      ...question,
+      prompt: `${question.prompt} ${'字'.repeat(1800)}`,
+      options: ['A', 'B', 'C', 'D'].map((option) => `${option}${'字'.repeat(799)}`),
+      explanation: '解'.repeat(2600),
+    }))
+    const groqFactory = vi.fn(async () => longQuestions)
+    const { host, guest, network, key } = await joinedGroqGame(500, { groqFactory })
+    expect(new TextEncoder().encode(JSON.stringify(longQuestions[0])).length).toBeGreaterThan(16300)
+    await host.startGame()
+    await until(() => host.state.screen === 'quiz' && guest.state.screen === 'quiz', 12000)
+    expect(groqFactory).toHaveBeenCalledTimes(1)
+    expect(guest.state.questions).toEqual(longQuestions)
+    expect(guest.state.questions).toEqual(host.state.questions)
+    const data = network.messages.filter((message) => message.type === 'question-data')
+    expect(data.length).toBeGreaterThan(30)
+    expect(data.every((message) => new TextEncoder().encode(JSON.stringify(message)).length < 16300)).toBe(true)
+    expect(JSON.stringify(network.messages)).not.toContain(key)
+  }, 15000)
+
+  it('retries a missing or corrupted chunk automatically without generating again', async () => {
+    for (const mode of ['drop', 'corrupt']) {
+      const network = new FakeNetwork()
+      let changed = false
+      if (mode === 'drop') network.drop = (message) => {
+        if (!changed && message.type === 'question-data') { changed = true; return true }
+        return false
+      }
+      else network.mutate = (message) => {
+        if (!changed && message.type === 'question-data') {
+          changed = true
+          return { ...message, data: (message.data[0] === 'A' ? 'B' : 'A') + message.data.slice(1) }
+        }
+        return message
+      }
+      const { host, guest, groqFactory } = await joinedGroqGame(50, { network })
+      await host.startGame()
+      await until(() => host.state.screen === 'quiz' && guest.state.screen === 'quiz')
+      expect(changed).toBe(true)
+      expect(groqFactory).toHaveBeenCalledTimes(1)
+      expect(network.messages.filter((message) => message.type === 'game-init')).toHaveLength(2)
+      expect(guest.state.questions).toEqual(host.state.questions)
+    }
+  })
+
+  it('waits for confirmation and retries an idle transfer without starting either player early', async () => {
+    const network = new FakeNetwork()
+    let discard = true
+    network.drop = (message) => message.type === 'game-loaded' && discard
+    const { host, guest, groqFactory } = await joinedGroqGame(50, { network, sessionOptions: { transferIdleMs: 30 } })
+    await host.startGame()
+    await until(() => network.messages.some((message) => message.type === 'game-loaded'))
+    expect(host.state.screen).toBe('lobby')
+    expect(guest.state.screen).toBe('lobby')
+    discard = false
+    await until(() => host.state.screen === 'quiz' && guest.state.screen === 'quiz')
+    expect(network.messages.filter((message) => message.type === 'game-init').length).toBeGreaterThanOrEqual(2)
+    expect(groqFactory).toHaveBeenCalledTimes(1)
+    expect(guest.state.questions).toEqual(host.state.questions)
+  })
+
+  it('recovers when the first ready confirmation is lost', async () => {
+    const network = new FakeNetwork()
+    let dropped = false
+    network.drop = (message) => {
+      if (!dropped && message.type === 'ready') { dropped = true; return true }
+      return false
+    }
+    const { host, guest, groqFactory } = await joinedGroqGame(50, { network, sessionOptions: { transferIdleMs: 30 } })
+    await host.startGame()
+    await until(() => host.state.screen === 'quiz' && guest.state.screen === 'quiz')
+    expect(dropped).toBe(true)
+    expect(network.messages.filter((message) => message.type === 'game-init').length).toBeGreaterThanOrEqual(2)
+    expect(groqFactory).toHaveBeenCalledTimes(1)
+    expect(guest.state.questions).toEqual(host.state.questions)
+  })
+
+  it('keeps generated questions for a manual retry after repeated transfer failures', async () => {
+    const network = new FakeNetwork()
+    let drops = 3
+    network.drop = (message) => {
+      if (message.type === 'question-data' && message.index === 0 && drops > 0) { drops -= 1; return true }
+      return false
+    }
+    const { host, guest, groqFactory } = await joinedGroqGame(50, { network })
+    await host.startGame()
+    await until(() => host.state.status === 'joined' && host.state.error.includes('Kirim soal lagi'))
+    expect(host.state.questions).toHaveLength(50)
+    expect(groqFactory).toHaveBeenCalledTimes(1)
+    await host.startGame()
+    await until(() => host.state.screen === 'quiz' && guest.state.screen === 'quiz')
+    expect(groqFactory).toHaveBeenCalledTimes(1)
+    expect(guest.state.questions).toEqual(host.state.questions)
+  })
+
+  it('waits for a full data-channel buffer to drain before sending chunks', async () => {
+    const { host, guest, network } = await joinedGroqGame(50)
+    host.connection.dataChannel = { bufferedAmount: 300000 }
+    await host.startGame()
+    await new Promise((resolve) => setTimeout(resolve, 35))
+    expect(network.messages.some((message) => message.type === 'question-data')).toBe(false)
+    host.connection.dataChannel.bufferedAmount = 0
+    await until(() => host.state.screen === 'quiz' && guest.state.screen === 'quiz')
+    expect(guest.state.questions).toEqual(host.state.questions)
+  })
+
+  it('resends the prepared round after a disconnect during transfer', async () => {
+    const { host, guest, groqFactory } = await joinedGroqGame(50)
+    const connection = host.connection
+    const send = connection.send.bind(connection)
+    let disconnected = false
+    connection.send = (message) => {
+      send(message)
+      if (!disconnected && message.type === 'question-data') { disconnected = true; connection.close() }
+    }
+    await host.startGame()
+    await until(() => !host.state.connected && !guest.state.connected)
+    expect(host.state.questions).toHaveLength(50)
+    expect(host.state.status).toBe('waiting')
+    guest.reconnect()
+    await until(() => host.state.screen === 'quiz' && guest.state.screen === 'quiz')
+    expect(groqFactory).toHaveBeenCalledTimes(1)
+    expect(guest.state.questions).toEqual(host.state.questions)
+  })
+
+  it('continues preparing while the guest is disconnected and starts automatically when they return', async () => {
+    let complete
+    let preparationSignal
+    const groqFactory = vi.fn((config, _key, { onProgress, signal }) => {
+      preparationSignal = signal
+      onProgress(1, config.count)
+      return new Promise((resolve) => { complete = resolve })
+    })
+    const { network, host, guest, key } = await joinedGroqGame(50, { groqFactory })
+    const preparing = host.startGame()
+    guest.connection.close()
+    await until(() => !host.state.connected && !guest.state.connected)
+    expect(preparationSignal.aborted).toBe(false)
+    expect(host.state.status).toBe('preparing')
+    complete(questionsFor(1, 50))
+    await preparing
+    expect(host.state.status).toBe('waiting')
+    expect(host.state.questions).toHaveLength(50)
+    // A reloaded guest has a new token, which is allowed before the game starts.
+    const returning = session(network)
+    returning.joinRoom({ name: 'Mentari', code: host.state.code })
+    await until(() => host.state.screen === 'quiz' && returning.state.screen === 'quiz')
+    expect(groqFactory).toHaveBeenCalledTimes(1)
+    expect(returning.state.questions).toEqual(host.state.questions)
+    expect(JSON.stringify(network.messages)).not.toContain(key)
+  })
+
+  it('lets the same guest reconnect while Groq is still preparing', async () => {
+    let complete
+    const groqFactory = vi.fn((config, _key, { onProgress }) => {
+      onProgress(2, config.count)
+      return new Promise((resolve) => { complete = resolve })
+    })
+    const { host, guest } = await joinedGroqGame(5, { groqFactory })
+    const preparing = host.startGame()
+    guest.connection.close()
+    await until(() => !host.state.connected && !guest.state.connected)
+    guest.reconnect()
+    await until(() => host.state.connected && guest.state.connected && guest.state.status === 'preparing')
+    expect(guest.state.preparation.done).toBe(2)
+    complete(questionsFor(1, 5))
+    await preparing
+    await until(() => host.state.screen === 'quiz' && guest.state.screen === 'quiz')
+    expect(groqFactory).toHaveBeenCalledTimes(1)
+    expect(guest.state.questions).toEqual(host.state.questions)
+  })
+
+  it('resumes completed Groq batches after an error instead of discarding them', async () => {
+    const quiz = questionsFor(1, 10)
+    const groqFactory = vi.fn(async (_config, _key, { onCheckpoint, initialQuestions }) => {
+      if (!initialQuestions.length) {
+        onCheckpoint(quiz.slice(0, 8))
+        throw new Error('Batas penggunaan Groq tercapai.')
+      }
+      expect(initialQuestions).toEqual(quiz.slice(0, 8))
+      return [...initialQuestions, ...quiz.slice(8)]
+    })
+    const { host, guest } = await joinedGroqGame(10, { groqFactory })
+    await host.startGame()
+    expect(host.state.error).toContain('tersimpan sementara')
+    await host.startGame()
+    await until(() => host.state.screen === 'quiz' && guest.state.screen === 'quiz')
+    expect(groqFactory).toHaveBeenCalledTimes(2)
+    expect(guest.state.questions).toEqual(quiz)
+  })
+
+  it('asks an outdated guest to reload before using the new transfer protocol', async () => {
+    const network = new FakeNetwork()
+    network.mutate = (message) => message.type === 'join' ? { ...message, protocol: undefined } : message
+    const host = session(network), guest = session(network)
+    host.createRoom({ name: 'Bintang', config: { ...DEFAULT_CONFIG, source: 'bank', count: 1 } })
+    await until(() => host.state.status === 'waiting')
+    guest.joinRoom({ name: 'Mentari', code: host.state.code })
+    await until(() => guest.state.status === 'error')
+    expect(guest.state.error).toContain('memuat ulang')
+    expect(host.state.connected).toBe(false)
+  })
+
+  it('still accepts the earlier question format from an already-open host', async () => {
+    const { host, guest } = await joinedGame(2)
+    const questions = questionsFor(1, 2)
+    host.patch({ questions, gameId: 'legacy-round-id' })
+    host.send({ type: 'game-init', gameId: 'legacy-round-id', total: 2 })
+    host.send({ type: 'question-chunk', gameId: 'legacy-round-id', index: 0, questions })
+    host.send({ type: 'game-loaded', gameId: 'legacy-round-id' })
+    await until(() => host.state.screen === 'quiz' && guest.state.screen === 'quiz')
+    expect(guest.state.questions).toEqual(questions)
   })
 
   it('rejects a third player without disturbing the first two', async () => {
@@ -209,7 +431,9 @@ describe('ruang dua pemain', () => {
       send(message)
     }
     await guest.playAgain()
-    await until(() => host.state.screen === 'lobby' && !guest.state.connected)
+    await until(() => !host.state.connected && !guest.state.connected)
+    // A send that closes synchronously is not treated as a successful rematch.
+    expect(host.state.screen).toBe('results')
     expect(guest.state.screen).toBe('results')
     guest.reconnect()
     await until(() => host.state.connected && guest.state.connected && guest.state.screen === 'lobby')

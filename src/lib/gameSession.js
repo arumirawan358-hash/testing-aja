@@ -2,6 +2,11 @@ import { CUSTOM_SUBJECT, cleanName, subjectName, validateConfig, validateName } 
 import { generateGroqQuestions } from './groq.js'
 import { areAnswersValid, isValidQuestion, makePracticeQuestions, scoreAnswers } from './questions.js'
 import { createPeer, makeRoomCode, makeToken, roomPeerId } from './peer.js'
+import { decodeQuestions, encodeQuestions, isValidChunkText, isValidTransferSize, TRANSFER_PROTOCOL } from './questionTransfer.js'
+
+const TRANSFER_IDLE_MS = 45000
+const MAX_TRANSFER_ATTEMPTS = 3
+const MAX_BUFFERED_BYTES = 256 * 1024
 
 const initialState = () => ({
   screen: 'home',
@@ -58,7 +63,7 @@ const safeError = (error) => {
 }
 
 export class GameSession {
-  constructor({ peerFactory = createPeer, practiceFactory = makePracticeQuestions, groqFactory = generateGroqQuestions, clock = () => Date.now() } = {}) {
+  constructor({ peerFactory = createPeer, practiceFactory = makePracticeQuestions, groqFactory = generateGroqQuestions, clock = () => Date.now(), transferIdleMs = TRANSFER_IDLE_MS, maxTransferAttempts = MAX_TRANSFER_ATTEMPTS } = {}) {
     this.peerFactory = peerFactory
     this.practiceFactory = practiceFactory
     this.groqFactory = groqFactory
@@ -79,6 +84,11 @@ export class GameSession {
     this.guestFinished = null
     this.elapsedMs = 0
     this.incoming = null
+    this.outgoing = null
+    this.activeTransfer = null
+    this.transferIdleMs = transferIdleMs
+    this.maxTransferAttempts = maxTransferAttempts
+    this.partialQuestions = []
     this.hostAttempts = 0
   }
 
@@ -96,8 +106,15 @@ export class GameSession {
     this.readyTimer = null
   }
 
+  cancelTransfer() {
+    this.activeTransfer = null
+    clearTimeout(this.readyTimer)
+    this.readyTimer = null
+  }
+
   cleanup() {
     this.clearTimers()
+    this.cancelTransfer()
     this.abortController?.abort()
     this.abortController = null
     const connection = this.connection
@@ -114,6 +131,8 @@ export class GameSession {
     this.guestToken = ''
     this.guestFinished = null
     this.incoming = null
+    this.outgoing = null
+    this.partialQuestions = []
     this.elapsedMs = 0
     this.hostAttempts = 0
   }
@@ -211,7 +230,7 @@ export class GameSession {
     }, 20000)
     connection.on('open', () => {
       if (this.connection !== connection) return
-      this.send({ type: 'join', name: this.state.selfName, token: this.selfToken })
+      this.send({ type: 'join', name: this.state.selfName, token: this.selfToken, protocol: TRANSFER_PROTOCOL })
     })
   }
 
@@ -263,9 +282,12 @@ export class GameSession {
     const token = typeof message.token === 'string' ? message.token : ''
     const name = cleanName(message.name)
     const invalid = validateName(name) || token.length < 10 || token.length > 100
-    const gameInProgress = ['quiz', 'waiting', 'results'].includes(this.state.screen) || this.state.status === 'preparing'
-    if (invalid || (gameInProgress && this.guestToken && token !== this.guestToken)) {
-      try { connection.send({ type: 'rejected', reason: invalid ? 'Data pemain tidak valid.' : 'Permainan sudah dimulai dan ruang penuh.' }) } catch { /* no-op */ }
+    // Before the quiz starts, a friend may reload/rejoin even if preparation is underway.
+    const gameInProgress = ['quiz', 'waiting', 'results'].includes(this.state.screen)
+    const oldVersion = message.protocol !== TRANSFER_PROTOCOL
+    if (invalid || oldVersion || (gameInProgress && this.guestToken && token !== this.guestToken)) {
+      const reason = invalid ? 'Data pemain tidak valid.' : oldVersion ? 'Versi KuisKita berbeda. Minta kedua pemain memuat ulang halaman, lalu gabung lagi.' : 'Permainan sudah dimulai dan ruang penuh.'
+      try { connection.send({ type: 'rejected', reason }) } catch { /* no-op */ }
       this.pending = null
       setTimeout(() => { try { connection.close() } catch { /* no-op */ } }, 150)
       return
@@ -285,7 +307,8 @@ export class GameSession {
       rematchRequested: this.state.rematchRequested,
     })
     if (this.state.screen === 'results' && this.state.result) this.send({ type: 'results', gameId: this.state.gameId, result: this.state.result })
-    else if (this.state.questions.length && ['quiz', 'waiting'].includes(this.state.screen)) this.sendQuestions()
+    else if (this.state.gameId && this.state.questions.length && ['lobby', 'quiz', 'waiting'].includes(this.state.screen)) this.sendQuestions()
+    else if (this.state.status === 'preparing') this.send({ type: 'preparing', done: this.state.preparation?.done || 0 })
   }
 
   connectionClosed(connection) {
@@ -293,25 +316,38 @@ export class GameSession {
     if (connection !== this.connection) return
     this.connection = null
     clearTimeout(this.connectTimer)
-    clearTimeout(this.readyTimer)
-    // Preserve the useful rejection / invalid-code error when an unaccepted
-    // connection closes immediately after sending it.
+    this.cancelTransfer()
+    this.incoming = null
+    try { connection.close() } catch { /* already closed */ }
+    // Preserve a rejection / invalid-code error when an unaccepted connection closes.
     if (this.state.status === 'error' && !this.state.connected) return
-    const wasPreparing = this.state.status === 'preparing'
-    if (wasPreparing) this.abortController?.abort()
     const inLobby = this.state.screen === 'lobby'
+    const generating = this.state.role === 'host' && inLobby && this.state.status === 'preparing' && this.abortController && !this.abortController.signal.aborted
+    const prepared = this.state.role === 'host' && inLobby && Boolean(this.state.gameId && this.state.questions.length)
     if (this.state.role === 'host' && inLobby) {
       this.guestToken = ''
       this.guestFinished = null
-      this.patch({ connected: false, opponentName: '', status: 'waiting', preparation: null, error: 'Teman terputus. Bagikan kode lagi untuk mengundangnya kembali.' })
+      if (generating) {
+        // Do not cancel paid AI work just because the other player disconnected.
+        this.patch({ connected: false, opponentName: '', error: 'Teman terputus. Soal tetap disiapkan; minta teman bergabung lagi.' })
+      } else if (prepared) {
+        this.patch({ connected: false, opponentName: '', status: 'waiting', preparation: null, error: 'Teman terputus. Soal sudah siap dan akan dikirim saat teman kembali.' })
+      } else {
+        this.patch({ connected: false, opponentName: '', status: 'waiting', preparation: null, error: 'Teman terputus. Bagikan kode lagi untuk mengundangnya kembali.' })
+      }
     } else {
-      this.patch({ connected: false, status: inLobby ? 'disconnected' : this.state.status, preparation: wasPreparing ? null : this.state.preparation, error: this.state.role === 'guest' ? 'Koneksi terputus. Hubungkan kembali untuk melanjutkan.' : 'Teman terputus. Minta teman menghubungkan kembali sebelum melanjutkan.' })
+      this.patch({ connected: false, status: inLobby ? 'disconnected' : this.state.status, preparation: inLobby ? null : this.state.preparation, error: this.state.role === 'guest' ? 'Koneksi terputus. Hubungkan kembali untuk melanjutkan.' : 'Teman terputus. Minta teman menghubungkan kembali sebelum melanjutkan.' })
     }
   }
 
   send(message) {
-    if (!this.connection?.open) return false
-    try { this.connection.send(message); return true } catch { return false }
+    const connection = this.connection
+    if (!connection?.open) return false
+    try {
+      connection.send(message)
+      // PeerJS can emit a synchronous error instead of throwing from send().
+      return this.connection === connection && connection.open
+    } catch { return false }
   }
 
   handleMessage(message) {
@@ -363,37 +399,89 @@ export class GameSession {
     if (message.type === 'game-init' && role === 'guest') {
       if (this.state.screen === 'results') return
       const total = Number(message.total)
-      if (!Number.isInteger(total) || total < 1 || total > 500 || total !== this.state.config?.count || typeof message.gameId !== 'string') return
-      this.incoming = { gameId: message.gameId, total, chunks: new Map() }
+      if (!Number.isInteger(total) || total < 1 || total > 500 || total !== this.state.config?.count || typeof message.gameId !== 'string' || !message.gameId.length || message.gameId.length > 100) return
+      // A reconnect or lost ready message does not require another transfer if
+      // this browser already verified the exact round.
+      if (this.state.gameId === message.gameId && this.state.questions.length === total) {
+        this.send({ type: 'ready', gameId: message.gameId, transferId: message.transferId })
+        return
+      }
+      if (message.protocol === TRANSFER_PROTOCOL) {
+        if (typeof message.transferId !== 'string' || !message.transferId.length || message.transferId.length > 100 || !isValidTransferSize(message.bytes, message.chunks) || typeof message.checksum !== 'string' || !/^[0-9a-f]{8}$/.test(message.checksum)) return
+        this.incoming = { protocol: TRANSFER_PROTOCOL, gameId: message.gameId, transferId: message.transferId, total, bytes: message.bytes, checksum: message.checksum, chunks: new Array(message.chunks), received: 0 }
+        this.patch({ status: 'receiving', preparation: { phase: 'transfer', done: 0, total: message.chunks }, error: '' })
+      } else if (message.protocol === undefined) {
+        // A newly loaded guest can still understand the previous host version.
+        this.incoming = { protocol: 1, gameId: message.gameId, total, chunks: new Map() }
+      }
       return
     }
-    if (message.type === 'question-chunk' && role === 'guest' && this.incoming && message.gameId === this.incoming.gameId) {
-      if (!Number.isInteger(message.index) || message.index < 0 || message.index > 30 || !Array.isArray(message.questions) || message.questions.length > 25 || !message.questions.every(isValidQuestion)) return
+    if (message.type === 'question-data' && role === 'guest' && this.incoming?.protocol === TRANSFER_PROTOCOL && message.gameId === this.incoming.gameId && message.transferId === this.incoming.transferId) {
+      const incoming = this.incoming
+      if (!Number.isInteger(message.index) || message.index < 0 || message.index >= incoming.chunks.length || !isValidChunkText(message.data)) return
+      if (incoming.chunks[message.index] === undefined) {
+        incoming.chunks[message.index] = message.data
+        incoming.received += 1
+      }
+      const interval = Math.max(1, Math.min(8, Math.ceil(incoming.chunks.length / 20)))
+      if (incoming.received === incoming.chunks.length || incoming.received % interval === 0) {
+        this.patch({ status: 'receiving', preparation: { phase: 'transfer', done: incoming.received, total: incoming.chunks.length } })
+        this.send({ type: 'transfer-progress', gameId: incoming.gameId, transferId: incoming.transferId, received: incoming.received })
+      }
+      return
+    }
+    if (message.type === 'question-chunk' && role === 'guest' && this.incoming?.protocol === 1 && message.gameId === this.incoming.gameId) {
+      if (!Number.isInteger(message.index) || message.index < 0 || message.index > 500 || !Array.isArray(message.questions) || message.questions.length > 25 || !message.questions.every(isValidQuestion)) return
       this.incoming.chunks.set(message.index, message.questions)
       return
     }
     if (message.type === 'game-loaded' && role === 'guest' && this.incoming && message.gameId === this.incoming.gameId) {
-      const chunks = [...this.incoming.chunks.entries()].sort((a, b) => a[0] - b[0])
-      const questions = chunks.flatMap(([, items]) => items)
-      if (questions.length !== this.incoming.total || chunks.some(([index], position) => index !== position)) {
-        this.patch({ error: 'Soal belum diterima lengkap. Minta pembuat ruang mencoba lagi.', status: 'joined' })
-        this.send({ type: 'load-failed', gameId: this.incoming.gameId })
+      const incoming = this.incoming
+      if (incoming.protocol === TRANSFER_PROTOCOL && message.transferId !== incoming.transferId) return
+      let questions
+      try {
+        if (incoming.protocol === TRANSFER_PROTOCOL) {
+          if (incoming.received !== incoming.chunks.length) throw new Error('Incomplete transfer')
+          questions = decodeQuestions(incoming.chunks, incoming.bytes, incoming.checksum)
+        } else {
+          const chunks = [...incoming.chunks.entries()].sort((a, b) => a[0] - b[0])
+          if (chunks.some(([index], position) => index !== position)) throw new Error('Incomplete transfer')
+          questions = chunks.flatMap(([, items]) => items)
+        }
+        if (!Array.isArray(questions) || questions.length !== incoming.total || !questions.every(isValidQuestion)) throw new Error('Invalid questions')
+      } catch {
         this.incoming = null
+        this.patch(incoming.protocol === TRANSFER_PROTOCOL
+          ? { status: 'receiving', error: 'Soal belum lengkap, mencoba mengirim ulang...' }
+          : { status: 'joined', preparation: null, error: 'Soal belum lengkap. Minta kedua pemain memuat ulang halaman lalu coba lagi.' })
+        this.send({ type: 'load-failed', gameId: incoming.gameId, transferId: incoming.transferId })
         return
       }
-      const sameGame = this.state.gameId === this.incoming.gameId
-      this.patch({ questions, gameId: this.incoming.gameId, answers: sameGame ? this.state.answers : [], status: 'ready', preparation: null, error: '' })
+      const sameGame = this.state.gameId === incoming.gameId
+      this.patch({ questions, gameId: incoming.gameId, answers: sameGame ? this.state.answers : [], status: 'ready', preparation: null, error: '' })
       this.incoming = null
-      this.send({ type: 'ready', gameId: this.state.gameId })
+      this.send({ type: 'ready', gameId: incoming.gameId, transferId: incoming.transferId })
       return
     }
-    if (message.type === 'load-failed' && role === 'host' && message.gameId === this.state.gameId) {
-      clearTimeout(this.readyTimer)
-      this.patch({ status: 'joined', preparation: null, error: 'Soal belum diterima teman dengan lengkap. Silakan mulai lagi.' })
+    if (message.type === 'transfer-progress' && role === 'host' && this.activeTransfer && message.gameId === this.activeTransfer.gameId && message.transferId === this.activeTransfer.transferId) {
+      const transfer = this.activeTransfer
+      if (Number.isInteger(message.received) && message.received >= 0 && message.received <= transfer.payload.chunks.length) {
+        if (this.state.screen === 'lobby') this.patch({ preparation: { phase: 'transfer', done: message.received, total: transfer.payload.chunks.length } })
+        this.armTransferTimeout(transfer)
+      }
+      return
+    }
+    if (message.type === 'load-failed' && role === 'host' && this.activeTransfer && message.gameId === this.activeTransfer.gameId && (!message.transferId || message.transferId === this.activeTransfer.transferId)) {
+      this.retryTransfer(this.activeTransfer)
+      return
+    }
+    if (message.type === 'transfer-failed' && role === 'guest' && this.state.screen === 'lobby') {
+      this.incoming = null
+      this.patch({ status: 'joined', preparation: null, error: 'Soal belum terkirim. Minta pembuat ruang mengirim ulang atau kedua pemain memuat ulang halaman.' })
       return
     }
     if (message.type === 'ready' && role === 'host' && message.gameId === this.state.gameId && this.state.questions.length) {
-      clearTimeout(this.readyTimer)
+      this.cancelTransfer()
       if (this.state.screen === 'results') {
         this.send({ type: 'results', gameId: this.state.gameId, result: this.state.result })
         return
@@ -406,7 +494,8 @@ export class GameSession {
     }
     if (message.type === 'go' && role === 'guest' && this.state.screen !== 'results' && message.gameId === this.state.gameId && this.state.questions.length) {
       const finished = this.state.answers.length === this.state.questions.length
-      this.patch({ screen: finished ? 'waiting' : 'quiz', status: 'playing', startedAt: this.state.startedAt || this.clock(), opponentProgress: Number(message.opponentProgress) || 0, error: '' })
+      this.incoming = null
+      this.patch({ screen: finished ? 'waiting' : 'quiz', status: 'playing', preparation: null, startedAt: this.state.startedAt || this.clock(), opponentProgress: Number(message.opponentProgress) || 0, error: '' })
       if (finished) this.sendFinished()
       return
     }
@@ -455,14 +544,23 @@ export class GameSession {
     if (this.state.role !== 'host' || this.state.screen !== 'results' || !this.state.connected) return
     if (!this.send({ type: 'rematch', gameId: this.state.gameId })) { this.patch({ error: 'Teman belum terhubung. Coba lagi.' }); return }
     this.guestFinished = null
+    this.cancelTransfer()
+    this.outgoing = null
+    this.partialQuestions = []
     this.patch(resetRound())
   }
 
   async startGame() {
-    if (this.state.role !== 'host' || this.state.screen !== 'lobby' || !this.state.connected || this.state.status === 'preparing') return
+    if (this.state.role !== 'host' || this.state.screen !== 'lobby' || !this.state.connected || ['preparing', 'sending', 'ready'].includes(this.state.status)) return
+    // Resending a prepared round never invokes Groq again.
+    if (this.state.gameId && this.state.questions.length === this.state.config.count) {
+      this.sendQuestions()
+      return
+    }
     this.guestFinished = null
-    this.patch({ status: 'preparing', error: '', preparation: { done: 0, total: this.state.config.count }, questions: [], answers: [], opponentProgress: 0, result: null, gameId: '' })
-    this.send({ type: 'preparing', done: 0 })
+    const done = this.partialQuestions.length
+    this.patch({ status: 'preparing', error: '', preparation: { done, total: this.state.config.count }, questions: [], answers: [], opponentProgress: 0, result: null, gameId: '' })
+    this.send({ type: 'preparing', done })
     await this.prepareQuestions()
   }
 
@@ -479,7 +577,13 @@ export class GameSession {
       const key = config.source === 'groq' ? historyKey(config) : ''
       const previous = key ? (this.questionHistory.get(key) || []) : []
       const questions = config.source === 'groq'
-        ? await this.groqFactory(config, this.aiKey, { onProgress: progress, signal: controller.signal, avoidPrompts: previous })
+        ? await this.groqFactory(config, this.aiKey, {
+          onProgress: progress,
+          onCheckpoint: (items) => { if (role === 'host' && this.abortController === controller && Array.isArray(items)) this.partialQuestions = items },
+          initialQuestions: role === 'host' ? this.partialQuestions : [],
+          signal: controller.signal,
+          avoidPrompts: previous,
+        })
         : this.practiceFactory(config)
       if (this.abortController !== controller || controller.signal.aborted) return
       if (!Array.isArray(questions) || questions.length !== config.count || !questions.every(isValidQuestion)) throw new Error('Soal yang dibuat belum lengkap. Silakan coba lagi.')
@@ -489,33 +593,91 @@ export class GameSession {
         this.questionHistory.set(key, [...previous, ...questions.map((question) => question.prompt)].slice(-1000))
       }
       const gameId = makeToken()
+      this.partialQuestions = []
+      this.outgoing = null
       this.patch({ questions, answers: [], gameId, opponentProgress: 0, preparation: null })
       if (role === 'solo') {
         this.patch({ screen: 'quiz', status: 'playing', startedAt: this.clock() })
       } else if (this.state.connected) {
         this.sendQuestions()
-        this.readyTimer = setTimeout(() => {
-          if (this.state.screen === 'lobby' && this.state.gameId === gameId) this.patch({ status: 'joined', error: 'Teman belum menerima soal. Periksa koneksi lalu coba lagi.' })
-        }, 30000)
       } else {
-        this.patch({ status: 'waiting', error: 'Teman terputus. Undang kembali sebelum memulai.' })
+        this.patch({ status: 'waiting', error: 'Teman terputus. Soal sudah siap dan akan dikirim saat teman kembali.' })
       }
     } catch (error) {
       if (controller.signal.aborted || this.abortController !== controller) return
-      this.patch({ status: role === 'solo' ? 'error' : 'joined', preparation: null, error: error?.message || 'Soal belum berhasil disiapkan. Silakan coba lagi.' })
+      const saved = role === 'host' && this.partialQuestions.length ? ' Soal yang sudah dibuat tersimpan sementara; mulai lagi untuk melanjutkan.' : ''
+      this.patch({ status: role === 'solo' ? 'error' : this.state.connected ? 'joined' : 'waiting', preparation: null, error: (error?.message || 'Soal belum berhasil disiapkan. Silakan coba lagi.') + saved })
       if (role === 'host') this.send({ type: 'preparation-failed' })
     } finally {
       if (this.abortController === controller) this.abortController = null
     }
   }
 
-  sendQuestions() {
-    const { questions, gameId } = this.state
-    if (!this.send({ type: 'game-init', gameId, total: questions.length })) return
-    for (let index = 0; index * 20 < questions.length; index += 1) {
-      this.send({ type: 'question-chunk', gameId, index, questions: questions.slice(index * 20, index * 20 + 20) })
+  armTransferTimeout(transfer) {
+    if (this.activeTransfer !== transfer) return
+    clearTimeout(this.readyTimer)
+    // Only an idle transfer times out; actual progress extends the deadline.
+    this.readyTimer = setTimeout(() => this.retryTransfer(transfer), this.transferIdleMs)
+  }
+
+  retryTransfer(transfer) {
+    if (this.activeTransfer !== transfer) return
+    if (!transfer.connection.open || this.connection !== transfer.connection) {
+      this.connectionClosed(transfer.connection)
+      return
     }
-    this.send({ type: 'game-loaded', gameId })
+    if (transfer.attempt + 1 < this.maxTransferAttempts) {
+      this.sendQuestions(transfer.attempt + 1)
+      return
+    }
+    this.cancelTransfer()
+    if (this.state.screen === 'lobby') {
+      this.patch({ status: 'joined', preparation: null, error: 'Soal sudah dibuat, tetapi belum terkirim. Tekan Kirim soal lagi; jika masih gagal, kedua pemain perlu memuat ulang halaman.' })
+    } else {
+      this.patch({ error: 'Soal belum tersinkron. Minta teman menghubungkan kembali.' })
+    }
+    this.send({ type: 'transfer-failed', gameId: transfer.gameId })
+  }
+
+  async sendQuestions(attempt = 0) {
+    const { questions, gameId } = this.state
+    const connection = this.connection
+    if (!connection?.open || !gameId || !questions.length) return
+    this.cancelTransfer()
+    let payload
+    try {
+      if (this.outgoing?.gameId !== gameId) this.outgoing = { gameId, payload: encodeQuestions(questions) }
+      payload = this.outgoing.payload
+    } catch (error) {
+      this.patch({ status: 'joined', preparation: null, error: error?.message || 'Paket soal belum dapat dikirim.' })
+      this.send({ type: 'transfer-failed', gameId })
+      return
+    }
+    const transfer = { gameId, connection, attempt, payload, transferId: makeToken() }
+    this.activeTransfer = transfer
+    if (this.state.screen === 'lobby') this.patch({ status: 'sending', preparation: { phase: 'transfer', done: 0, total: payload.chunks.length }, error: '' })
+    const active = () => this.activeTransfer === transfer && this.connection === connection && connection.open && this.state.gameId === gameId
+    const send = (message) => active() && this.send(message) && active()
+    if (!send({ type: 'game-init', protocol: TRANSFER_PROTOCOL, gameId, transferId: transfer.transferId, total: questions.length, bytes: payload.bytes, chunks: payload.chunks.length, checksum: payload.checksum })) {
+      if (active()) this.retryTransfer(transfer)
+      return
+    }
+    this.armTransferTimeout(transfer)
+    for (let index = 0; index < payload.chunks.length; index += 1) {
+      // Avoid flooding the RTCDataChannel (or PeerJS's own queue) on slow links.
+      while (active() && ((connection.dataChannel?.bufferedAmount || 0) > MAX_BUFFERED_BYTES || (connection.bufferSize || 0) > 0)) {
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
+      if (!active()) return
+      if (!send({ type: 'question-data', gameId, transferId: transfer.transferId, index, data: payload.chunks[index] })) {
+        if (active()) this.retryTransfer(transfer)
+        return
+      }
+      // Yield periodically so incoming progress, disconnects and the UI are processed.
+      if (index % 16 === 15) await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    if (!active()) return
+    if (!send({ type: 'game-loaded', gameId, transferId: transfer.transferId }) && active()) this.retryTransfer(transfer)
   }
 
   submitAnswer(answer) {

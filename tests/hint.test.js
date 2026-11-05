@@ -11,12 +11,12 @@ describe('hint pada setiap soal', () => {
     expect(render({ question, enabled: false })).toBe('')
   })
 
-  it('shows the correct option and letter when enabled, regardless of answer position', () => {
+  it('shows a discreet marker for the correct option when enabled', () => {
     for (let answer = 0; answer < 4; answer += 1) {
       const html = render({ question: { ...question, answer }, enabled: true })
-      expect(html).toContain(`${'ABCD'[answer]}. ${question.options[answer]}`)
-      expect(html).toContain('Hint jawaban')
-      expect(html).toContain('aria-live="polite"')
+      expect(html).toContain(`aria-label="Penanda ${'ABCD'[answer]}"`)
+      expect(html).not.toContain('Hint jawaban')
+      expect(html).not.toContain(question.options[answer])
     }
   })
 

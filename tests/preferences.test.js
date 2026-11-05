@@ -3,7 +3,7 @@ import { HINT_STORAGE_KEY, PROFILE_STORAGE_KEY, emptyProfile, loadHintEnabled, l
 
 function memoryStorage() {
   const data = new Map()
-  return { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => data.set(key, String(value)), data }
+  return { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => data.set(key, String(value)), removeItem: (key) => data.delete(key), data }
 }
 
 describe('profil dan pengaturan lokal', () => {
@@ -16,6 +16,17 @@ describe('profil dan pengaturan lokal', () => {
     saveHintEnabled(false, storage)
     expect(loadHintEnabled(storage)).toBe(false)
     storage.setItem(HINT_STORAGE_KEY, 'unexpected')
+    expect(loadHintEnabled(storage)).toBe(false)
+  })
+
+  it('migrates an existing preference without changing its setting', () => {
+    const storage = memoryStorage()
+    storage.setItem('kuiskita:hint', 'on')
+    expect(loadHintEnabled(storage)).toBe(true)
+    saveHintEnabled(true, storage)
+    expect(storage.getItem('kuiskita:hint')).toBe(null)
+    expect(storage.getItem(HINT_STORAGE_KEY)).toBe('on')
+    saveHintEnabled(false, storage)
     expect(loadHintEnabled(storage)).toBe(false)
   })
 

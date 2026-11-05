@@ -1,7 +1,8 @@
 import { cleanName, validateName } from '../data/subjects.js'
 
 export const PROFILE_STORAGE_KEY = 'kuiskita:profile'
-export const HINT_STORAGE_KEY = 'kuiskita:hint'
+export const HINT_STORAGE_KEY = 'kuiskita:about'
+const LEGACY_HINT_STORAGE_KEY = 'kuiskita:hint'
 const MAX_RECENT_GAMES = 100
 const MAX_GAMES = 1000000
 
@@ -31,11 +32,17 @@ export function saveProfile(profile, storage = browserStorage()) {
 }
 
 export function loadHintEnabled(storage = browserStorage()) {
-  try { return storage?.getItem(HINT_STORAGE_KEY) === 'on' } catch { return false }
+  try {
+    const saved = storage?.getItem(HINT_STORAGE_KEY)
+    return (saved ?? storage?.getItem(LEGACY_HINT_STORAGE_KEY)) === 'on'
+  } catch { return false }
 }
 
 export function saveHintEnabled(enabled, storage = browserStorage()) {
-  try { storage?.setItem(HINT_STORAGE_KEY, enabled ? 'on' : 'off') } catch { /* preference remains usable for this tab */ }
+  try {
+    storage?.setItem(HINT_STORAGE_KEY, enabled ? 'on' : 'off')
+    storage?.removeItem?.(LEGACY_HINT_STORAGE_KEY)
+  } catch { /* preference remains usable for this tab */ }
 }
 
 export function recordCompletedGame(profile, gameId, score) {
