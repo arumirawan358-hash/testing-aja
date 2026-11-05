@@ -19,12 +19,20 @@ export const LEVELS = [
   },
 ]
 
+export const CUSTOM_SUBJECT = 'Lainnya (AI)'
+
 export const DEFAULT_CONFIG = {
   level: 'SD',
   grade: 4,
   subject: 'Matematika',
+  customSubject: '',
+  topic: '',
   count: 10,
   source: 'bank',
+}
+
+export function subjectName(config) {
+  return config?.subject === CUSTOM_SUBJECT ? String(config.customSubject || '').trim() : config?.subject || ''
 }
 
 export function getLevel(id) {
@@ -34,9 +42,13 @@ export function getLevel(id) {
 export function validateConfig(config) {
   const level = getLevel(config?.level)
   if (!level || !level.grades.includes(Number(config.grade))) return 'Pilih jenjang dan kelas yang sesuai.'
-  if (!level.subjects.includes(config.subject)) return 'Pilih mata pelajaran yang tersedia.'
-  if (!Number.isInteger(Number(config.count)) || Number(config.count) < 1 || Number(config.count) > 500) return 'Jumlah soal harus antara 1 dan 500.'
   if (!['bank', 'ai'].includes(config.source)) return 'Pilih sumber soal.'
+  if (config.subject === CUSTOM_SUBJECT && config.source === 'ai') {
+    const custom = typeof config.customSubject === 'string' ? config.customSubject.trim() : ''
+    if (custom.length < 2 || custom.length > 60) return 'Masukkan nama mata pelajaran (2–60 karakter).'
+  } else if (!level.subjects.includes(config.subject)) return 'Pilih mata pelajaran yang tersedia.'
+  if (config.topic != null && (typeof config.topic !== 'string' || config.topic.length > 100)) return 'Topik maksimal 100 karakter.'
+  if (!Number.isInteger(Number(config.count)) || Number(config.count) < 1 || Number(config.count) > 500) return 'Jumlah soal harus antara 1 dan 500.'
   return ''
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CONFIG, LEVELS, validateConfig } from '../src/data/subjects.js'
+import { CUSTOM_SUBJECT, DEFAULT_CONFIG, LEVELS, subjectName, validateConfig } from '../src/data/subjects.js'
 import { isValidQuestion, makePracticeQuestions, scoreAnswers } from '../src/lib/questions.js'
 
 describe('bank soal dan penilaian', () => {
@@ -25,6 +25,15 @@ describe('bank soal dan penilaian', () => {
     expect(validateConfig({ ...DEFAULT_CONFIG, count: 500 })).toBe('')
     for (const count of [0, 501, 1.5, '', -1]) expect(validateConfig({ ...DEFAULT_CONFIG, count })).not.toBe('')
     expect(() => makePracticeQuestions({ ...DEFAULT_CONFIG, count: 501 })).toThrow()
+  })
+
+  it('allows an additional subject and topic only with AI mode', () => {
+    const config = { ...DEFAULT_CONFIG, source: 'ai', subject: CUSTOM_SUBJECT, customSubject: 'Seni Budaya', topic: 'Musik tradisional' }
+    expect(validateConfig(config)).toBe('')
+    expect(subjectName(config)).toBe('Seni Budaya')
+    expect(validateConfig({ ...config, customSubject: '' })).not.toBe('')
+    expect(validateConfig({ ...config, source: 'bank' })).not.toBe('')
+    expect(validateConfig({ ...config, topic: 'x'.repeat(101) })).not.toBe('')
   })
 
   it('separates correct, wrong and skipped answers and rounds the score', () => {

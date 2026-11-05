@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { DEFAULT_CONFIG } from '../src/data/subjects.js'
+import { CUSTOM_SUBJECT, DEFAULT_CONFIG } from '../src/data/subjects.js'
 import { generateAiQuestions } from '../src/lib/ai.js'
 
 function mockGemini() {
@@ -28,6 +28,14 @@ describe('soal Gemini', () => {
     expect(fetchImpl.mock.calls[0][0]).not.toContain('test-key')
     expect(progress[0]).toEqual([0, 500])
     expect(progress.at(-1)).toEqual([500, 500])
+  })
+
+  it('passes a custom subject and requested topic to Gemini', async () => {
+    const fetchImpl = mockGemini()
+    await generateAiQuestions({ ...DEFAULT_CONFIG, source: 'ai', count: 1, subject: CUSTOM_SUBJECT, customSubject: 'Seni Budaya', topic: 'Musik tradisional' }, 'key', { fetchImpl })
+    const prompt = JSON.parse(fetchImpl.mock.calls[0][1].body).contents[0].parts[0].text
+    expect(prompt).toContain('Seni Budaya')
+    expect(prompt).toContain('Musik tradisional')
   })
 
   it('reports missing or rejected keys without leaking them', async () => {

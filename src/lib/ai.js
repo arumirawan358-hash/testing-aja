@@ -1,5 +1,5 @@
 import { isValidQuestion } from './questions.js'
-import { validateConfig } from '../data/subjects.js'
+import { subjectName, validateConfig } from '../data/subjects.js'
 
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'
 const BATCH_SIZE = 25
@@ -42,7 +42,7 @@ function friendlyHttpError(status) {
 }
 
 async function requestBatch(config, apiKey, amount, recent, batchNumber, signal, fetchImpl) {
-  const prompt = `Kamu adalah guru Indonesia yang teliti. Buat tepat ${amount} soal pilihan ganda berbeda untuk ${config.level} kelas ${config.grade}, mata pelajaran ${config.subject}. Gunakan bahasa Indonesia yang jelas dan tingkat kesulitan yang sesuai kelas. Untuk Bahasa Inggris, boleh gunakan kalimat bahasa Inggris sebagai bahan soal. Setiap soal wajib memiliki tepat empat pilihan jawaban berbeda, hanya satu jawaban yang benar, indeks jawaban benar 0 sampai 3, dan penjelasan singkat yang faktual. Variasikan konsep, konteks, dan posisi jawaban. Jangan sertakan soal yang sama atau hampir sama. Ini bagian ${batchNumber}; buat topik yang bervariasi.${recent.length ? ` Hindari mengulang soal berikut: ${JSON.stringify(recent)}` : ''} Kembalikan JSON sesuai skema.`
+  const prompt = `Kamu adalah guru Indonesia yang teliti. Buat tepat ${amount} soal pilihan ganda berbeda untuk ${config.level} kelas ${config.grade}, mata pelajaran ${subjectName(config)}.${config.topic?.trim() ? ` Fokuskan soal pada topik: ${config.topic.trim()}.` : ''} Gunakan bahasa Indonesia yang jelas dan tingkat kesulitan yang sesuai kelas. Untuk Bahasa Inggris, boleh gunakan kalimat bahasa Inggris sebagai bahan soal. Setiap soal wajib memiliki tepat empat pilihan jawaban berbeda, hanya satu jawaban yang benar, indeks jawaban benar 0 sampai 3, dan penjelasan singkat yang faktual. Variasikan konsep, konteks, dan posisi jawaban. Jangan sertakan soal yang sama atau hampir sama. Ini bagian ${batchNumber}; buat topik yang bervariasi.${recent.length ? ` Hindari mengulang soal berikut: ${JSON.stringify(recent)}` : ''} Kembalikan JSON sesuai skema.`
   const body = JSON.stringify({
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: { temperature: 0.85, maxOutputTokens: 16384, responseMimeType: 'application/json', responseSchema, thinkingConfig: { thinkingBudget: 0 } },
