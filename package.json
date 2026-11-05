@@ -4,19 +4,15 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k -n signal,ai,web -c magenta,yellow,cyan \"node server/peer-server.js\" \"node server/groq-server.js\" \"vite --host 0.0.0.0\"",
+    "dev": "concurrently -k -n signal,web -c magenta,cyan \"node server/peer-server.js\" \"vite --host 0.0.0.0\"",
     "build": "vite build",
-    "preview": "concurrently -k -n signal,ai,web -c magenta,yellow,cyan \"node server/peer-server.js\" \"node server/groq-server.js\" \"vite preview --host 0.0.0.0\"",
+    "preview": "concurrently -k -n signal,web -c magenta,cyan \"node server/peer-server.js\" \"vite preview --host 0.0.0.0\"",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "start:groq": "node server/groq-server.js"
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@fontsource-variable/outfit": "^5.2.6",
     "@fontsource-variable/plus-jakarta-sans": "^5.2.6",
-    "dotenv": "^16.6.1",
-    "express": "^4.22.3",
-    "express-rate-limit": "^7.5.1",
     "lucide-react": "^0.468.0",
     "peer": "^1.0.2",
     "peerjs": "^1.5.5",
@@ -28,6 +24,6 @@
     "@vitejs/plugin-react": "^4.4.1",
     "concurrently": "^9.1.2",
     "vite": "^6.3.5",
-    "vitest": "^3.1.4"
+    "vitest": "^5.1.0"
   }
 }
