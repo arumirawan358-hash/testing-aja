@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { CUSTOM_SUBJECT, DEFAULT_CONFIG } from '../src/data/subjects.js'
+import { CUSTOM_SUBJECT, DEFAULT_CONFIG, LEVELS } from '../src/data/subjects.js'
 import { generateGroqQuestions, GROQ_MODEL, questionFingerprint } from '../src/lib/groq.js'
 import { isValidQuestion } from '../src/lib/questions.js'
 
@@ -39,6 +39,18 @@ describe('Groq langsung dari browser', () => {
     expect(body.messages[1].content).toContain('Musik tradisional')
     expect(isValidQuestion(questions[0])).toBe(true)
     expect(questions[0].options[questions[0].answer]).toBe('Pilihan benar')
+  })
+
+  it('includes the selected level, grade, subject and topic for every school grade', async () => {
+    const fetchImpl = mockGroq()
+    for (const level of LEVELS) for (const grade of level.grades) {
+      const subject = level.subjects.at(-1)
+      await generateGroqQuestions({ ...config, level: level.id, grade, subject, topic: 'Topik uji', count: 1 }, fakeKey, { fetchImpl })
+      const prompt = JSON.parse(fetchImpl.mock.calls.at(-1)[1].body).messages[1].content
+      expect(prompt).toContain(`jenjang ${level.id}, kelas ${grade}`)
+      expect(prompt).toContain(subject)
+      expect(prompt).toContain('Topik uji')
+    }
   })
 
   it('requests 1–500 questions in batches, validates them, and reports progress', async () => {

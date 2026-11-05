@@ -31,7 +31,7 @@ function publicConfig(config) {
     grade: Number(config.grade),
     subject: config.subject,
     customSubject: config.subject === CUSTOM_SUBJECT ? config.customSubject.trim() : '',
-    topic: typeof config.topic === 'string' ? config.topic.trim() : '',
+    topic: config.source === 'groq' && typeof config.topic === 'string' ? config.topic.trim() : '',
     count: Number(config.count),
     source: config.source,
   }

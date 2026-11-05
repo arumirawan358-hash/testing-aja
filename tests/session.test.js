@@ -194,6 +194,29 @@ describe('ruang dua pemain', () => {
     expect(guest.state.rematchRequested).toBe(false)
   })
 
+  it('rejoins the lobby if the rematch signal was lost during a disconnect', async () => {
+    const { host, guest } = await joinedGame(1)
+    await host.startGame()
+    await until(() => guest.state.screen === 'quiz')
+    finish(host); finish(guest)
+    await until(() => guest.state.screen === 'results')
+    await host.playAgain()
+    await until(() => guest.state.opponentRematchRequested)
+    const connection = host.connection
+    const send = connection.send.bind(connection)
+    connection.send = (message) => {
+      if (message.type === 'rematch') { connection.close(); return }
+      send(message)
+    }
+    await guest.playAgain()
+    await until(() => host.state.screen === 'lobby' && !guest.state.connected)
+    expect(guest.state.screen).toBe('results')
+    guest.reconnect()
+    await until(() => host.state.connected && guest.state.connected && guest.state.screen === 'lobby')
+    expect(guest.state.questions).toHaveLength(0)
+    expect(guest.state.rematchRequested).toBe(false)
+  })
+
   it('preserves rematch readiness when a guest reconnects on the results screen', async () => {
     const { host, guest } = await joinedGame(1)
     await host.startGame()
@@ -237,6 +260,13 @@ describe('solo dan riwayat variasi', () => {
     solo.destroy()
     expect(solo.questionHistory.size).toBe(0)
     expect(solo.aiKey).toBe('')
+  })
+
+  it('does not advertise an AI-only topic when switching to the practice bank', async () => {
+    const solo = session(new FakeNetwork())
+    await solo.startSolo({ name: 'Bintang', config: { ...DEFAULT_CONFIG, source: 'bank', count: 1, topic: 'Topik AI lama' } })
+    expect(solo.state.config.topic).toBe('')
+    expect(solo.state.screen).toBe('quiz')
   })
 
   it('aborts preparation and clears the key if the player leaves', async () => {
