@@ -28,11 +28,12 @@ class FakeConnection extends EventEmitter {
 }
 class FakePeer extends EventEmitter {
   constructor(network, id) {
-    super(); this.network = network; this.id = id || `guest-${++network.counter}`; this.destroyed = false; this.disconnected = false
+    super(); this.network = network; this.id = id || `guest-${++network.counter}`; this.destroyed = false; this.disconnected = false; this.open = false
     network.peers.set(this.id, this)
-    queueMicrotask(() => { if (!this.destroyed) this.emit('open', this.id) })
+    queueMicrotask(() => { if (!this.destroyed) { this.open = true; this.emit('open', this.id) } })
   }
   connect(id) {
+    if (this.disconnected) return undefined
     const host = this.network.peers.get(id)
     const local = new FakeConnection(this.network), remote = new FakeConnection(this.network)
     local.other = remote; remote.other = local
@@ -45,7 +46,7 @@ class FakePeer extends EventEmitter {
     })
     return local
   }
-  reconnect() { this.disconnected = false }
+  reconnect() { this.disconnected = false; this.open = false; queueMicrotask(() => { if (!this.destroyed) { this.open = true; this.emit('open', this.id) } }) }
   destroy() { this.destroyed = true; this.network.peers.delete(this.id) }
 }
 class FakeNetwork {
@@ -65,9 +66,9 @@ afterEach(() => { while (sessions.length) sessions.pop().destroy() })
 const questionsFor = (round, count) => Array.from({ length: count }, (_, i) => ({ id: `q-${i}`, prompt: `Soal ronde ${round} nomor ${i}`, options: ['A', 'B', 'C', 'D'], answer: 0, explanation: 'A benar.' }))
 const finish = (game) => { while (game.state.screen === 'quiz') game.submitAnswer(game.state.questions[game.state.answers.length].answer) }
 
-async function joinedGame(count = 3) {
-  const network = new FakeNetwork()
-  const host = session(network), guest = session(network)
+async function joinedGame(count = 3, options = {}) {
+  const network = options.network || new FakeNetwork()
+  const host = session(network, options.hostOptions), guest = session(network, options.guestOptions)
   const config = { ...DEFAULT_CONFIG, source: 'bank', count }
   host.createRoom({ name: 'Bintang', config })
   await until(() => host.state.status === 'waiting')
@@ -329,6 +330,253 @@ describe('ruang dua pemain', () => {
     await until(() => third.state.status === 'error')
     expect(third.state.error).toContain('penuh')
     expect(host.state.connected && guest.state.connected).toBe(true)
+  })
+
+  it('lets both players answer during a disconnect and synchronizes progress after reconnecting', async () => {
+    const { host, guest } = await joinedGame(4)
+    await host.startGame()
+    await until(() => host.state.screen === 'quiz' && guest.state.screen === 'quiz')
+    guest.connection.close()
+    await until(() => !host.state.connected && !guest.state.connected)
+    guest.submitAnswer(guest.state.questions[0].answer)
+    guest.submitAnswer(guest.state.questions[1].answer)
+    host.submitAnswer(host.state.questions[0].answer)
+    expect(guest.state.answers).toHaveLength(2)
+    expect(host.state.answers).toHaveLength(1)
+    expect(guest.state.error).toMatch(/tersimpan|lanjut/i)
+    guest.reconnect()
+    await until(() => host.state.connected && guest.state.connected && host.state.opponentProgress === 2 && guest.state.opponentProgress === 1)
+    finish(host); finish(guest)
+    await until(() => guest.state.screen === 'results')
+    expect(host.state.result.host.score).toBe(100)
+    expect(guest.state.result.guest.score).toBe(100)
+  })
+
+  it('delivers both results when both players finish while disconnected', async () => {
+    const { host, guest } = await joinedGame(3)
+    await host.startGame()
+    await until(() => host.state.screen === 'quiz' && guest.state.screen === 'quiz')
+    guest.connection.close()
+    await until(() => !host.state.connected && !guest.state.connected)
+    for (let i = 0; i < 3; i += 1) {
+      host.submitAnswer(host.state.questions[i].answer)
+      guest.submitAnswer(guest.state.questions[i].answer)
+    }
+    expect(host.state.screen).toBe('waiting')
+    expect(guest.state.screen).toBe('waiting')
+    expect(host.state.answers).toHaveLength(3)
+    expect(guest.state.answers).toHaveLength(3)
+    guest.reconnect()
+    await until(() => host.state.screen === 'results' && guest.state.screen === 'results')
+    expect(guest.state.result).toEqual(host.state.result)
+    expect(host.state.result.host.score).toBe(100)
+    expect(host.state.result.guest.score).toBe(100)
+  })
+
+  it('does not replace a working data connection when signaling opens again', async () => {
+    const { host, guest, network } = await joinedGame(3)
+    await host.startGame()
+    await until(() => host.state.screen === 'quiz' && guest.state.screen === 'quiz')
+    const connection = guest.connection
+    const joins = network.messages.filter((message) => message.type === 'join').length
+    host.peer.emit('open')
+    guest.peer.emit('open')
+    await new Promise((resolve) => setTimeout(resolve, 15))
+    expect(guest.connection).toBe(connection)
+    expect(host.state.status).toBe('playing')
+    expect(host.state.connected && guest.state.connected).toBe(true)
+    expect(network.messages.filter((message) => message.type === 'join')).toHaveLength(joins)
+  })
+
+  it('ignores a duplicate tap made for the previous question', async () => {
+    const { host, guest } = await joinedGame(3)
+    await host.startGame()
+    await until(() => host.state.screen === 'quiz' && guest.state.screen === 'quiz')
+    const question = { gameId: guest.state.gameId, index: 0 }
+    guest.submitAnswer(0, question)
+    guest.submitAnswer(0, question)
+    expect(guest.state.answers).toHaveLength(1)
+    guest.submitAnswer(1, { gameId: guest.state.gameId, index: 1 })
+    expect(guest.state.answers).toEqual([0, 1])
+  })
+
+  it('automatically retries a temporary outage and resynchronizes locally saved answers', async () => {
+    const { network, host, guest } = await joinedGame(3, { guestOptions: { reconnectBaseMs: 20 } })
+    await host.startGame()
+    await until(() => host.state.screen === 'quiz' && guest.state.screen === 'quiz')
+    const hostPeer = host.peer
+    network.peers.delete(hostPeer.id)
+    guest.connection.close()
+    await until(() => !host.state.connected && !guest.state.connected)
+    guest.submitAnswer(guest.state.questions[0].answer)
+    host.submitAnswer(host.state.questions[0].answer)
+    await until(() => guest.reconnectAttempts >= 2)
+    expect(guest.state.answers).toHaveLength(1)
+    network.peers.set(hostPeer.id, hostPeer)
+    await until(() => host.state.connected && guest.state.connected && host.state.opponentProgress === 1 && guest.state.opponentProgress === 1)
+    finish(host); finish(guest)
+    await until(() => guest.state.screen === 'results')
+    expect(guest.state.result).toEqual(host.state.result)
+    expect(guest.state.result.guest.score).toBe(100)
+  })
+
+  it('waits for signaling to reopen before trying to reconnect the data channel', async () => {
+    const { host, guest } = await joinedGame(3)
+    await host.startGame()
+    await until(() => guest.state.screen === 'quiz')
+    guest.connection.close()
+    await until(() => !host.state.connected && !guest.state.connected)
+    const peer = guest.peer
+    peer.disconnected = true
+    peer.open = false
+    const connect = vi.spyOn(peer, 'connect')
+    vi.spyOn(peer, 'reconnect').mockImplementation(() => { peer.disconnected = false })
+    guest.reconnect()
+    expect(connect).not.toHaveBeenCalled()
+    expect(guest.state.status).toBe('connecting')
+    peer.open = true
+    peer.emit('open', peer.id)
+    await until(() => host.state.connected && guest.state.connected)
+    expect(connect).toHaveBeenCalledTimes(1)
+  })
+
+  it('recovers if signaling never reopens by replacing the guest peer', async () => {
+    const { host, guest } = await joinedGame(3, { guestOptions: { reconnectBaseMs: 15, connectTimeoutMs: 35 } })
+    await host.startGame()
+    await until(() => guest.state.screen === 'quiz')
+    guest.submitAnswer(guest.state.questions[0].answer)
+    guest.connection.close()
+    await until(() => !host.state.connected && !guest.state.connected)
+    const stuckPeer = guest.peer
+    stuckPeer.disconnected = true
+    stuckPeer.open = false
+    vi.spyOn(stuckPeer, 'reconnect').mockImplementation(() => { stuckPeer.disconnected = false })
+    guest.reconnect()
+    await until(() => guest.peer !== stuckPeer && host.state.connected && guest.state.connected)
+    expect(stuckPeer.destroyed).toBe(true)
+    expect(guest.state.answers).toHaveLength(1)
+  })
+
+  it('restores signaling without replacing an active game connection', async () => {
+    const options = { reconnectBaseMs: 15 }
+    const { host, guest, network } = await joinedGame(3, { hostOptions: options, guestOptions: options })
+    await host.startGame()
+    await until(() => guest.state.screen === 'quiz')
+    const guestConnection = guest.connection
+    const joins = network.messages.filter((message) => message.type === 'join').length
+    for (const peer of [host.peer, guest.peer]) {
+      peer.open = false
+      peer.disconnected = true
+      peer.emit('disconnected')
+    }
+    await until(() => host.peer.open && guest.peer.open)
+    expect(guest.connection).toBe(guestConnection)
+    expect(host.state.status).toBe('playing')
+    expect(network.messages.filter((message) => message.type === 'join')).toHaveLength(joins)
+    finish(host); finish(guest)
+    await until(() => guest.state.screen === 'results')
+    expect(guest.state.result).toEqual(host.state.result)
+  })
+
+  it('keeps the host playing if signaling fails while the guest is away', async () => {
+    const { host, guest } = await joinedGame(3)
+    await host.startGame()
+    await until(() => guest.state.screen === 'quiz')
+    guest.connection.close()
+    await until(() => !host.state.connected && !guest.state.connected)
+    host.peer.emit('error', { type: 'network' })
+    expect(host.state.status).toBe('playing')
+    expect(host.state.error).toContain('tetap bisa menjawab')
+    host.submitAnswer(0)
+    expect(host.state.answers).toHaveLength(1)
+    guest.reconnect()
+    await until(() => host.state.connected && guest.state.connected)
+    finish(host); finish(guest)
+    await until(() => guest.state.screen === 'results')
+    expect(guest.state.result).toEqual(host.state.result)
+  })
+
+  it('handles PeerJS returning no connection if signaling becomes unavailable', async () => {
+    const { host, guest } = await joinedGame(3)
+    await host.startGame()
+    await until(() => guest.state.screen === 'quiz')
+    guest.connection.close()
+    await until(() => !host.state.connected && !guest.state.connected)
+    guest.peer.disconnected = true
+    expect(() => guest.connectToHost()).not.toThrow()
+    expect(guest.state.status).toBe('disconnected')
+    expect(guest.state.answers).toHaveLength(0)
+  })
+
+  it('recreates a destroyed guest peer without losing the player token or answers', async () => {
+    const { host, guest } = await joinedGame(3)
+    await host.startGame()
+    await until(() => guest.state.screen === 'quiz')
+    guest.submitAnswer(guest.state.questions[0].answer)
+    const oldPeer = guest.peer
+    const token = guest.selfToken
+    guest.connection.close()
+    oldPeer.destroy()
+    await until(() => !host.state.connected && !guest.state.connected)
+    guest.reconnect()
+    await until(() => host.state.connected && guest.state.connected)
+    expect(guest.peer).not.toBe(oldPeer)
+    expect(guest.selfToken).toBe(token)
+    expect(guest.state.answers).toHaveLength(1)
+    finish(host); finish(guest)
+    await until(() => guest.state.screen === 'results')
+    expect(guest.state.result.guest.score).toBe(100)
+  })
+
+  it('retries a lost completion or result message when the host finished first', async () => {
+    for (const lostType of ['finished', 'results']) {
+      const network = new FakeNetwork()
+      let dropped = false
+      network.drop = (message) => {
+        if (!dropped && message.type === lostType) { dropped = true; return true }
+        return false
+      }
+      const { host, guest } = await joinedGame(3, { network, guestOptions: { finishedRetryMs: 20 } })
+      await host.startGame()
+      await until(() => guest.state.screen === 'quiz')
+      finish(host)
+      expect(host.state.screen).toBe('waiting')
+      finish(guest)
+      await until(() => host.state.screen === 'results' && guest.state.screen === 'results')
+      expect(dropped).toBe(true)
+      expect(network.messages.filter((message) => message.type === 'finished').length).toBeGreaterThanOrEqual(2)
+      expect(guest.state.result).toEqual(host.state.result)
+    }
+  })
+
+  it('stops reconnecting when a player intentionally closes the room', async () => {
+    const { network, host, guest } = await joinedGame(3, { guestOptions: { reconnectBaseMs: 15 } })
+    await host.startGame()
+    await until(() => guest.state.screen === 'quiz')
+    const joins = network.messages.filter((message) => message.type === 'join').length
+    guest.handleMessage({ type: 'room-closed' })
+    guest.connection.close()
+    await until(() => !host.state.connected)
+    guest.reconnect()
+    guest.submitAnswer(0)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(guest.state.roomClosed).toBe(true)
+    expect(guest.state.error).toContain('meninggalkan')
+    expect(guest.state.answers).toEqual([0])
+    expect(network.messages.filter((message) => message.type === 'join')).toHaveLength(joins)
+  })
+
+  it('cancels automatic reconnection when leaving the game', async () => {
+    const { network, host, guest } = await joinedGame(3, { guestOptions: { reconnectBaseMs: 30 } })
+    await host.startGame()
+    await until(() => guest.state.screen === 'quiz')
+    guest.connection.close()
+    await until(() => !guest.state.connected)
+    const joins = network.messages.filter((message) => message.type === 'join').length
+    guest.quit()
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    expect(guest.state.screen).toBe('home')
+    expect(network.messages.filter((message) => message.type === 'join')).toHaveLength(joins)
   })
 
   it('can reconnect the guest during a game without losing answers', async () => {

@@ -1,0 +1,24 @@
+name: Temporary PeerJS Cloud browser probe
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+        env:
+          VITE_BASE_PATH: /testing-aja/
+          VITE_SIGNALING_MODE: cloud
+      - run: npm install --no-save --no-package-lock playwright-core@1.57.0
+      - name: Exercise real PeerJS Cloud and WebRTC in Chrome
+        run: node .github/arena-probes/peer-cloud.cjs
