@@ -33,22 +33,6 @@ jobs:
         run: npm ci
       - name: Run tests
         run: npm test
-      # Temporary, anonymous probe to verify whether the real Groq endpoint allows browser access.
-      - name: Probe Groq browser CORS (no valid key)
-        run: |
-          set -eu
-          url='https://api.groq.com/openai/v1/chat/completions'
-          origin='https://arumirawan358-hash.github.io'
-          status=$(curl --max-time 30 -sS -o /dev/null -D /tmp/groq-preflight -w '%{http_code}' -X OPTIONS "$url" -H "Origin: $origin" -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: authorization,content-type')
-          echo "Preflight HTTP $status"
-          test "$status" = 204
-          tr -d '\r' < /tmp/groq-preflight | grep -qi '^access-control-allow-origin: \*'
-          tr -d '\r' < /tmp/groq-preflight | grep -qi '^access-control-allow-headers:.*authorization'
-          status=$(curl --max-time 30 -sS -o /dev/null -D /tmp/groq-post -w '%{http_code}' -X POST "$url" -H "Origin: $origin" -H 'Authorization: Bearer invalid-test-token' -H 'Content-Type: application/json' -d '{"model":"openai/gpt-oss-120b","messages":[{"role":"user","content":"test"}]}')
-          echo "Fake-key request HTTP $status (401 expected)"
-          test "$status" = 401
-          tr -d '\r' < /tmp/groq-post | grep -qi '^access-control-allow-origin: \*'
-          echo 'Groq browser CORS checks passed; no model completion was requested with a valid key.'
       - name: Build site
         run: npm run build
         env:
