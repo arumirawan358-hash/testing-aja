@@ -3,6 +3,8 @@ import { ArrowDown, ArrowRight, ArrowUpRight, BadgeCheck, BookOpen, Check, Chevr
 import Brand from './Brand.jsx'
 import { CUSTOM_SUBJECT, DEFAULT_CONFIG, LEVELS, getLevel, validateConfig, validateName } from '../data/subjects.js'
 import SoundToggle from './SoundToggle.jsx'
+import MenuButtons from './MenuButtons.jsx'
+import { usePreferences } from './PreferencesContext.jsx'
 
 const features = [
   { icon: Layers3, title: '1–500 soal', subtitle: 'Pilih sesuai maumu', color: 'violet' },
@@ -25,12 +27,14 @@ function FeatureStrip() {
 }
 
 function SetupForm({ session }) {
-  const [name, setName] = useState('')
+  const { profile, saveName } = usePreferences()
+  const [name, setName] = useState(profile.name)
   const [config, setConfig] = useState(DEFAULT_CONFIG)
   const [apiKey, setApiKey] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [error, setError] = useState('')
   const currentLevel = getLevel(config.level)
+  useEffect(() => { setName(profile.name) }, [profile.name])
 
   function updateLevel(levelId) {
     const level = getLevel(levelId)
@@ -40,6 +44,7 @@ function SetupForm({ session }) {
     const message = validateName(name) || validateConfig(config) || (config.source === 'groq' && !apiKey.trim() ? 'Masukkan API key Groq terlebih dahulu, ya.' : '')
     if (message) { setError(message); return }
     setError('')
+    saveName(name)
     const data = { name, config: { ...config, count: Number(config.count), grade: Number(config.grade) }, apiKey: config.source === 'groq' ? apiKey : '' }
     if (solo) session.startSolo(data)
     else session.createRoom(data)
@@ -112,10 +117,12 @@ function SetupForm({ session }) {
 }
 
 function JoinForm({ session }) {
+  const { profile, saveName } = usePreferences()
   const urlCode = typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('room') || ''
-  const [name, setName] = useState('')
+  const [name, setName] = useState(profile.name)
   const [code, setCode] = useState(urlCode.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))
   const [error, setError] = useState('')
+  useEffect(() => { setName(profile.name) }, [profile.name])
 
   useEffect(() => {
     if (urlCode) setTimeout(() => document.getElementById('gabung')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300)
@@ -126,6 +133,7 @@ function JoinForm({ session }) {
     const message = validateName(name) || (!/^[A-Z0-9]{6}$/.test(code) ? 'Kode ruang harus terdiri dari 6 karakter.' : '')
     if (message) { setError(message); return }
     setError('')
+    saveName(name)
     session.joinRoom({ name, code })
   }
   return (
@@ -164,7 +172,7 @@ export default function Landing({ session }) {
         <div className="container header-inner">
           <Brand onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} />
           <nav className="desktop-nav" aria-label="Navigasi utama"><a className="active" href="#beranda">Beranda</a><a href="#cara-main">Cara bermain</a><a href="#keunggulan">Keunggulan</a></nav>
-          <div className="header-actions"><SoundToggle /><a href="#mulai" className="header-cta">Yuk, mulai! <ArrowUpRight size={16} /></a></div>
+          <div className="header-actions"><SoundToggle /><MenuButtons /><a href="#mulai" className="header-cta">Yuk, mulai! <ArrowUpRight size={16} /></a></div>
         </div>
       </header>
       <main>
