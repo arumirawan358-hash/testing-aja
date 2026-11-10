@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
-import { ArrowDown, ArrowRight, ArrowUpRight, BadgeCheck, BookOpen, Check, ChevronRight, CircleHelp, Copy, GraduationCap, Hash, Heart, KeyRound, Layers3, LockKeyhole, Play, Plus, ShieldCheck, Sparkles, UsersRound, WandSparkles, Zap } from 'lucide-react'
+import { ArrowDown, ArrowRight, ArrowUpRight, BadgeCheck, BookOpen, Check, ChevronRight, CircleHelp, Copy, GraduationCap, Hash, Heart, KeyRound, Layers3, LockKeyhole, Play, Plus, ShieldCheck, Sparkles, Target, Trophy, UserRound, UsersRound, WandSparkles, Zap } from 'lucide-react'
 import Brand from './Brand.jsx'
 import { CUSTOM_SUBJECT, DEFAULT_CONFIG, LEVELS, getLevel, validateConfig, validateName } from '../data/subjects.js'
 import SoundToggle from './SoundToggle.jsx'
 import MenuButtons from './MenuButtons.jsx'
+import { RankBadge } from './ProfileCard.jsx'
+import { RANKS } from '../lib/ranks.js'
+import { assetUrl, avatarSrc } from '../data/avatars.js'
 import { usePreferences } from './PreferencesContext.jsx'
 
 const features = [
@@ -150,6 +153,21 @@ function JoinForm({ session }) {
   )
 }
 
+function RankShowcase() {
+  return <section className="rank-showcase-section container" id="rank">
+    <div className="rank-showcase surface">
+      <div className="rank-showcase-copy">
+        <span className="eyebrow section-eyebrow"><span>✦</span> SISTEM RANK KEPINTARAN</span>
+        <h2>Main, menang, naikkan rank-mu!</h2>
+        <p>Setiap jawaban benar menambah poin kepintaran. Semakin tinggi rank, semakin berkilau lencanamu — dan temanmu bisa melihatnya saat melihat profilmu.</p>
+        <div className="rank-ladder">{RANKS.map((rank) => <RankBadge key={rank.tier} rank={rank} />)}</div>
+        <div className="rank-perks"><span><Trophy size={15} /> Winrate tercatat</span><span><Target size={15} /> Skor kepintaran</span><span><UserRound size={15} /> Profil bisa dilihat teman</span></div>
+      </div>
+      <div className="rank-showcase-art"><img src={assetUrl('champion.png')} alt="Piala juara dengan konfeti dan bintang" /></div>
+    </div>
+  </section>
+}
+
 function HowToPlay() {
   const steps = [
     ['01', 'Buat atau gabung ruang', 'Atur kuis dan bagikan kode ke temanmu.'],
@@ -182,7 +200,7 @@ export default function Landing({ session }) {
             <h1>Belajar makin<br /><span>seru bareng!</span></h1>
             <p className="hero-description">Ubah belajar jadi petualangan seru. Buat kuis, ajak teman, dan tumbuh lebih pintar bersama!</p>
             <div className="hero-actions"><a className="button button-primary hero-primary" href="#mulai">Mulai bermain <ArrowRight size={19} /></a><a className="hero-secondary" href="#gabung"><span className="play-circle"><Play size={12} fill="currentColor" /></span> Punya kode ruang?</a></div>
-            <div className="hero-social"><div className="mini-avatars" aria-hidden="true"><span>A</span><span>K</span><span>S</span></div><div><strong>Lebih seru kalau bersama!</strong><small>Teman belajar untuk rasa ingin tahumu <span>✦</span></small></div></div>
+            <div className="hero-social"><div className="mini-avatars" aria-hidden="true">{['bintang', 'kupu', 'kucing'].map((id) => <span key={id}><img src={avatarSrc(id)} alt="" /></span>)}</div><div><strong>Lebih seru kalau bersama!</strong><small>Teman belajar untuk rasa ingin tahumu <span>✦</span></small></div></div>
           </div>
           <div className="hero-visual">
             <div className="hero-art-frame"><img src={`${import.meta.env.BASE_URL}study-buddies.png`} alt="Dua teman belajar bersama dengan laptop dan buku" /></div>
@@ -198,6 +216,7 @@ export default function Landing({ session }) {
             <div className="play-grid"><SetupForm session={session} /><div className="play-side"><JoinForm session={session} /><HowToPlay /></div></div>
           </div>
         </section>
+        <RankShowcase />
         <section className="closing-section container"><div className="closing-content"><div><span className="eyebrow">SEDIKIT DEMI SEDIKIT, JADI HEBAT</span><h2>Belajar lebih asyik<br />kalau ada teman. <span>✳</span></h2><p>Nggak perlu sempurna, yang penting terus mencoba.</p></div><a href="#mulai" className="button button-light">Ayo mulai <ArrowRight size={18} /></a></div></section>
       </main>
       <footer className="footer"><div className="container footer-inner"><div><Brand onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} /><p>Teman kecil untuk mimpi yang besar. ✨</p></div><div className="footer-right"><span>Dibuat untuk belajar bersama <Heart size={14} fill="currentColor" /></span><small>© {new Date().getFullYear()} KuisKita</small></div></div></footer>

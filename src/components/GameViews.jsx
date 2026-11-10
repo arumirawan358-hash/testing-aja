@@ -5,7 +5,10 @@ import AnswerHint from './AnswerHint.jsx'
 import Brand from './Brand.jsx'
 import SoundToggle from './SoundToggle.jsx'
 import MenuButtons from './MenuButtons.jsx'
+import ChampionCelebration from './ChampionCelebration.jsx'
+import { Avatar, PlayerProfileModal, RankBadge } from './ProfileCard.jsx'
 import { usePreferences } from './PreferencesContext.jsx'
+import { toViewProfile } from '../lib/ranks.js'
 import { subjectName } from '../data/subjects.js'
 
 function GameHeader({ state, session }) {
@@ -44,8 +47,8 @@ async function copyText(text) {
   if (!ok) throw new Error('copy failed')
 }
 
-function PlayerCard({ name, label, color, waiting = false }) {
-  return <div className={`lobby-player ${waiting ? 'player-empty' : ''}`}><div className={`player-avatar ${color}`}>{waiting ? <UserRound size={23} /> : (name?.charAt(0).toUpperCase() || '?')}</div><div className="player-details"><span>{label}</span><strong>{waiting ? 'Menunggu teman...' : name}</strong><small>{waiting ? 'Bagikan kode ruangmu' : <><span className="online-dot" /> Siap bermain</>}</small></div>{!waiting && <BadgeCheck className="player-check" size={20} />}</div>
+function PlayerCard({ name, label, color, waiting = false, profile, onOpenProfile }) {
+  return <div className={`lobby-player ${waiting ? 'player-empty' : ''}`}><Avatar avatarId={profile?.avatar} name={name} className={`player-avatar ${color}`} /><div className="player-details"><span>{label}</span><strong>{waiting ? 'Menunggu teman...' : name}</strong><small>{waiting ? 'Bagikan kode ruangmu' : <><span className="online-dot" /> {profile ? <RankBadge rank={profile.rank} compact /> : 'Siap bermain'}</>}</small></div>{!waiting && (profile && onOpenProfile ? <button type="button" className="player-profile-link" onClick={onOpenProfile} aria-label={`Lihat profil ${name}`}>Profil</button> : <BadgeCheck className="player-check" size={20} />)}</div>
 }
 
 function SettingsSummary({ config }) {
@@ -56,6 +59,9 @@ function LayersIcon() { return <span className="layers-symbol">◫</span> }
 
 export function Lobby({ state, session }) {
   const [copied, setCopied] = useState('')
+  const [viewing, setViewing] = useState(null)
+  const { profile } = usePreferences()
+  const selfProfile = toViewProfile(profile)
   const code = state.code
   const shareLink = useMemo(() => code ? makeShareLink(code) : '', [code])
   const isHost = state.role === 'host'
@@ -68,6 +74,8 @@ export function Lobby({ state, session }) {
   const preparationDetail = state.status === 'ready' ? 'Menunggu kedua pemain siap.' : transferring ? `${state.preparation?.done || 0} dari ${state.preparation?.total || 0} bagian diterima. Permainan dimulai otomatis.` : `${state.preparation?.done || 0} dari ${state.config?.count || 0} soal siap. Permintaan AI dibuat bertahap; jangan tutup halaman.`
   const hostName = isHost ? state.selfName : state.opponentName
   const guestName = isHost ? state.opponentName : state.selfName
+  const hostProfile = isHost ? selfProfile : state.opponentProfile
+  const guestProfile = isHost ? state.opponentProfile : selfProfile
   const shareEnabled = isHost && !['connecting', 'error'].includes(state.status)
   const progress = state.preparation ? Math.round(100 * state.preparation.done / Math.max(1, state.preparation.total)) : 0
 
@@ -98,7 +106,7 @@ export function Lobby({ state, session }) {
               <div className="private-note"><LockKeyhole size={15} /> Bagikan kode hanya kepada temanmu. Ruang aktif selama halaman host tetap terbuka.</div>
             </section>
             <section className="surface lobby-players-card"><div className="lobby-card-heading"><div><span className="small-label">PEMAIN DI RUANGAN</span><h2>Tim pintar <span>✳</span></h2><p>Maksimal 2 pemain dalam satu ruang.</p></div><span className="player-count">{state.connected ? '2' : '1'} / 2</span></div>
-              <div className="lobby-player-list"><PlayerCard name={hostName} label="PEMBUAT RUANG" color="lavender" waiting={!hostName} /><PlayerCard name={guestName} label={isHost ? 'TEMANMU' : 'KAMU'} color="peach" waiting={!guestName || (isHost && !state.connected)} /></div>
+              <div className="lobby-player-list"><PlayerCard name={hostName} label="PEMBUAT RUANG" color="lavender" waiting={!hostName} profile={hostProfile} onOpenProfile={hostProfile ? () => setViewing(hostProfile) : null} /><PlayerCard name={guestName} label={isHost ? 'TEMANMU' : 'KAMU'} color="peach" waiting={!guestName || (isHost && !state.connected)} profile={guestProfile} onOpenProfile={guestProfile ? () => setViewing(guestProfile) : null} /></div>
               <SettingsSummary config={state.config} />
               {isPreparing ? <div className="preparing-box"><div><LoaderCircle className="spin" size={20} /><strong>{preparationTitle}</strong></div><div className="wide-progress"><span style={{ width: `${state.status === 'ready' ? 100 : progress}%` }} /></div><small>{preparationDetail}</small></div> : isHost ? <><button className="button button-primary lobby-start" disabled={!state.connected || isConnecting || state.status === 'error'} onClick={() => session.startGame()}>{preparedRound ? 'Kirim soal lagi' : 'Mulai permainan'} <ArrowRight size={18} /></button><p className="under-button">{state.connected ? (preparedRound ? 'Soal yang sudah dibuat akan digunakan kembali.' : 'Semua siap! Petualangan dimulai saat kamu menekan tombol.') : 'Tombol akan aktif setelah temanmu bergabung.'}</p></> : <div className="guest-wait"><span className="pulse-dot" /> {isConnecting ? 'Menghubungkan ke ruang...' : state.connected ? 'Menunggu host memulai permainan...' : 'Menunggu koneksi...'}</div>}
               {state.role === 'guest' && !state.connected && !isConnecting && state.status !== 'error' && <button className="button button-soft reconnect-button" onClick={() => session.reconnect()}><RotateCcw size={16} /> Hubungkan lagi</button>}
@@ -106,6 +114,7 @@ export function Lobby({ state, session }) {
           </div>
         )}
         <button className="back-home" onClick={() => session.quit()}><ArrowLeft size={16} /> Kembali ke beranda</button>
+        <PlayerProfileModal profile={viewing} onClose={() => setViewing(null)} />
       </main>
     </div>
   )
@@ -151,21 +160,26 @@ function formatTime(ms) {
   return minutes ? `${minutes} m ${seconds % 60} d` : `${seconds} detik`
 }
 
-function ScoreCard({ player, self, winner }) {
-  return <div className={`score-card ${self ? 'score-self' : ''}`}><div className="score-player"><span className={`player-avatar ${self ? 'lavender' : 'peach'}`}>{player.name.charAt(0).toUpperCase()}</span><span><strong>{player.name} {self && <small>(kamu)</small>}</strong><small>{winner ? '✦ Nilai tertinggi' : 'Pemain hebat'}</small></span></div><div className="score-number">{player.score}<small>/100</small></div><div className="score-stats"><span><CheckCircle2 size={15} /> {player.correct} benar</span><span><XCircle size={15} /> {player.wrong} salah</span><span><Clock3 size={15} /> {formatTime(player.elapsedMs)}</span></div>{player.skipped > 0 && <p className="skipped-count">{player.skipped} soal dilewati</p>}</div>
+function ScoreCard({ player, self, winner, profile, onOpenProfile }) {
+  return <div className={`score-card ${self ? 'score-self' : ''} ${winner ? 'score-winner' : ''}`}><div className="score-player"><Avatar avatarId={profile?.avatar} name={player.name} className={`player-avatar ${self ? 'lavender' : 'peach'}`} /><span><strong>{player.name} {self && <small>(kamu)</small>}</strong><small>{winner ? '✦ Nilai tertinggi' : 'Pemain hebat'}</small>{profile && <RankBadge rank={profile.rank} compact />}</span>{profile && onOpenProfile && <button type="button" className="player-profile-link" onClick={onOpenProfile} aria-label={`Lihat profil ${player.name}`}>Profil</button>}</div><div className="score-number">{player.score}<small>/100</small></div><div className="score-stats"><span><CheckCircle2 size={15} /> {player.correct} benar</span><span><XCircle size={15} /> {player.wrong} salah</span><span><Clock3 size={15} /> {formatTime(player.elapsedMs)}</span></div>{player.skipped > 0 && <p className="skipped-count">{player.skipped} soal dilewati</p>}</div>
 }
 
 export function Results({ state, session }) {
   const [visible, setVisible] = useState(5)
+  const [viewing, setViewing] = useState(null)
+  const { profile } = usePreferences()
+  const selfProfile = toViewProfile(profile)
   const result = state.result
   if (!result) return null
   const self = state.role === 'guest' ? result.guest : result.host
   const other = state.role === 'guest' ? result.host : result.guest
   const tie = other && self.score === other.score
   const winner = other && !tie ? (self.score > other.score ? self.name : other.name) : null
+  const winnerProfile = winner && winner === self.name ? selfProfile : winner ? state.opponentProfile : null
   return <div className="game-page results-page"><GameHeader state={state} session={session} /><main className="game-container results-container"><div className="result-heading"><div className="trophy-icon"><Trophy size={29} fill="currentColor" /></div><span className="eyebrow section-eyebrow"><span>✦</span> PERMAINAN SELESAI</span><h1>Hebat, kamu berhasil!</h1><p>{other ? tie ? 'Seri! Kalian sama-sama luar biasa.' : `${winner} mendapat nilai tertinggi. Kalian berdua keren!` : 'Setiap soal yang dikerjakan adalah langkah maju.'}</p></div>
     <Notice state={state} session={session} />
-    <div className={`score-grid ${!other ? 'single' : ''}`}><ScoreCard player={self} self winner={other && self.score > other.score} />{other && <ScoreCard player={other} winner={other.score > self.score} />}</div>
+    {winner && <ChampionCelebration winnerName={winner} rank={winnerProfile?.rank} selfWon={winner === self.name} />}
+    <div className={`score-grid ${!other ? 'single' : ''}`}><ScoreCard player={self} self winner={other && self.score > other.score} profile={selfProfile} onOpenProfile={() => setViewing(selfProfile)} />{other && <ScoreCard player={other} winner={other.score > self.score} profile={state.opponentProfile} onOpenProfile={state.opponentProfile ? () => setViewing(state.opponentProfile) : null} />}</div>
     <div className="result-tip"><Sparkles size={19} /><span><strong>Belajar nggak berhenti di sini.</strong> Yuk, lihat pembahasannya untuk tahu apa yang sudah kamu kuasai.</span></div>
     <section className="surface review-card"><div className="review-header"><div><span className="small-label">BELAJAR DARI JAWABANMU</span><h2>Pembahasan soal</h2><p>Nilai = jumlah benar ÷ jumlah soal × 100, dibulatkan.</p></div><span className="review-total">{state.questions.length} SOAL</span></div><div className="review-list">{state.questions.slice(0, visible).map((question, index) => {
       const answer = state.answers[index]
@@ -180,6 +194,7 @@ export function Results({ state, session }) {
         <button className="button button-primary" data-sound="next" disabled={state.role !== 'solo' && (!state.connected || state.rematchRequested)} onClick={() => session.playAgain()}><RotateCcw size={17} /> {state.rematchRequested ? 'Menunggu teman...' : 'Main lagi'}</button>
         <button className="button button-outline" onClick={() => session.quit()}>{state.role === 'solo' ? 'Ubah pengaturan' : 'Keluar ke beranda'}</button>
       </div>
+      <PlayerProfileModal profile={viewing} onClose={() => setViewing(null)} />
       {state.config.source === 'groq' && <p className="replay-hint">Soal baru diupayakan berbeda. AI masih bisa mengulang atau membuat kesalahan.</p>}
     </div>
   </main></div>

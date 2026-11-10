@@ -785,3 +785,46 @@ describe('solo dan riwayat variasi', () => {
     expect(solo.aiKey).toBe('')
   })
 })
+
+describe('profil pemain', () => {
+  it('exchanges profiles on join/welcome and live updates after stats change', async () => {
+    const network = new FakeNetwork()
+    const host = session(network), guest = session(network)
+    const config = { ...DEFAULT_CONFIG, source: 'bank', count: 2 }
+    host.setSelfProfile({ name: 'Bintang', avatar: 'kucing', smartPoints: 750, wins: 3, draws: 1, losses: 0, gamesPlayed: 4, correctAnswers: 21, totalAnswered: 30 })
+    guest.setSelfProfile({ name: 'Mentari', avatar: 'robot', smartPoints: 120, wins: 1, draws: 0, losses: 2, gamesPlayed: 3, correctAnswers: 9, totalAnswered: 18 })
+    host.createRoom({ name: 'Bintang', config })
+    await until(() => host.state.status === 'waiting')
+    guest.joinRoom({ name: 'Mentari', code: host.state.code })
+    await until(() => host.state.connected && guest.state.connected)
+    await until(() => host.state.opponentProfile && guest.state.opponentProfile)
+    expect(guest.state.opponentProfile).toMatchObject({ name: 'Bintang', avatar: 'kucing', smartPoints: 750, winRate: 75, accuracy: 70 })
+    expect(guest.state.opponentProfile.rank).toMatchObject({ tier: 3, name: 'Bintang Cemerlang', bling: 3 })
+    expect(host.state.opponentProfile).toMatchObject({ name: 'Mentari', avatar: 'robot', smartPoints: 120, winRate: 33, accuracy: 50 })
+    // An updated local profile (e.g. after winning) is pushed to the other player.
+    host.setSelfProfile({ name: 'Bintang', avatar: 'kucing', smartPoints: 820, wins: 4, draws: 1, losses: 0, gamesPlayed: 5, correctAnswers: 25, totalAnswered: 35 })
+    await until(() => guest.state.opponentProfile?.smartPoints === 820)
+    host.quit()
+  })
+
+  it('ignores forged profile data instead of trusting the other player', async () => {
+    const network = new FakeNetwork()
+    const host = session(network), guest = session(network)
+    const config = { ...DEFAULT_CONFIG, source: 'bank', count: 2 }
+    network.mutate = (message) => {
+      if (message.type === 'join') message.profile = { name: 'Jahat', smartPoints: 'bukan-angka', wins: -99, accuracy: 5000, rank: { name: 'PALSU', bling: 99, tier: 99 } }
+      return message
+    }
+    host.createRoom({ name: 'Bintang', config })
+    await until(() => host.state.status === 'waiting')
+    guest.joinRoom({ name: 'Mentari', code: host.state.code })
+    await until(() => host.state.connected && guest.state.connected)
+    await until(() => host.state.opponentProfile)
+    expect(host.state.opponentProfile.name).toBe('Jahat')
+    expect(host.state.opponentProfile.smartPoints).toBe(0)
+    expect(host.state.opponentProfile.wins).toBe(0)
+    expect(host.state.opponentProfile.accuracy).toBe(100)
+    expect(host.state.opponentProfile.rank).toMatchObject({ tier: 0, name: 'Tunas Bintang', bling: 0 })
+    host.quit()
+  })
+})

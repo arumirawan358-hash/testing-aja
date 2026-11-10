@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { HINT_STORAGE_KEY, PROFILE_STORAGE_KEY, emptyProfile, loadHintEnabled, loadProfile, recordCompletedGame, sanitizeProfile, saveHintEnabled, saveProfile } from '../src/lib/preferences.js'
+import { HINT_STORAGE_KEY, PROFILE_STORAGE_KEY, emptyProfile, loadHintEnabled, loadProfile, profileSummary, recordCompletedGame, sanitizeProfile, saveHintEnabled, saveProfile } from '../src/lib/preferences.js'
 
 function memoryStorage() {
   const data = new Map()
@@ -69,5 +69,31 @@ describe('profil dan pengaturan lokal', () => {
     const storage = memoryStorage()
     storage.setItem(PROFILE_STORAGE_KEY, '{invalid')
     expect(loadProfile(storage)).toEqual(emptyProfile())
+  })
+})
+
+describe('statistik profil lengkap', () => {
+  it('records wins, draws, losses, smart points, and accuracy once per game', () => {
+    let profile = { ...emptyProfile(), name: 'Mentari', avatar: 'kucing' }
+    profile = recordCompletedGame(profile, 'duel-1', 80, { correct: 4, total: 5, result: 'win' })
+    expect(profile).toMatchObject({ wins: 1, draws: 0, losses: 0, smartPoints: 40 + 30, correctAnswers: 4, totalAnswered: 5 })
+    // Idempotent: the same game must not change stats again.
+    profile = recordCompletedGame(profile, 'duel-1', 80, { correct: 9, total: 9, result: 'loss' })
+    expect(profile).toMatchObject({ wins: 1, losses: 0, smartPoints: 70 })
+    profile = recordCompletedGame(profile, 'duel-2', 50, { correct: 2, total: 5, result: 'loss' })
+    profile = recordCompletedGame(profile, 'duel-3', 50, { correct: 2, total: 5, result: 'draw' })
+    expect(profile).toMatchObject({ wins: 1, draws: 1, losses: 1 })
+    expect(profile.smartPoints).toBe(70 + 25 + 35)
+    expect(profileSummary(profile)).toMatchObject({ winRate: 33, accuracy: 53 })
+  })
+
+  it('keeps legacy outcomes working and validates avatars', () => {
+    let profile = recordCompletedGame({ ...emptyProfile(), name: 'Bintang' }, 'old-game', 60)
+    expect(profile).toMatchObject({ gamesPlayed: 1, wins: 0, draws: 0, losses: 0, smartPoints: 0 })
+    const saved = sanitizeProfile({ ...profile, avatar: 'kupu', apiKey: 'rahasia' })
+    expect(saved.avatar).toBe('kupu')
+    expect(sanitizeProfile({ ...profile, avatar: 'tidak-ada' }).avatar).toBe('bintang')
+    expect(JSON.stringify(saved)).not.toContain('rahasia')
+    expect(profileSummary(emptyProfile())).toMatchObject({ winRate: 0, accuracy: null })
   })
 })
