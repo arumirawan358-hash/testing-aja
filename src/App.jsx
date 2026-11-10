@@ -10,11 +10,13 @@ function GameApp() {
   const [state, setState] = useState(session.getState)
   const previous = useRef({ screen: state.screen, connected: state.connected })
   const { play } = useSound()
-  const { recordResult } = usePreferences()
+  const { recordResult, profile } = usePreferences()
   useEffect(() => {
     const unsubscribe = session.subscribe(setState)
     return () => { unsubscribe(); session.destroy() }
   }, [session])
+  // Profil dikirim langsung ke pemain lain setiap berubah (misal setelah menang).
+  useEffect(() => { session.setSelfProfile(profile) }, [session, profile])
   useEffect(() => { window.scrollTo({ top: 0, behavior: 'instant' }) }, [state.screen])
   useEffect(() => {
     if (previous.current.screen !== 'results' && state.screen === 'results') play('finish')
@@ -24,7 +26,13 @@ function GameApp() {
   useEffect(() => {
     if (state.screen !== 'results' || !state.result) return
     const mine = state.role === 'guest' ? state.result.guest : state.result.host
-    if (mine) recordResult(state.gameId, mine.score)
+    if (!mine) return
+    let result = 'solo'
+    if (state.result.host && state.result.guest) {
+      const otherScore = state.role === 'guest' ? state.result.host.score : state.result.guest.score
+      result = mine.score > otherScore ? 'win' : mine.score < otherScore ? 'loss' : 'draw'
+    }
+    recordResult(state.gameId, mine.score, { correct: mine.correct, total: mine.total, result })
   }, [state.screen, state.role, state.result, state.gameId, recordResult])
 
   if (state.screen === 'lobby') return <Lobby state={state} session={session} />

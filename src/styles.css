@@ -599,3 +599,107 @@ a { color: inherit; text-decoration: none; }
   .preference-row { gap: 9px; padding: 11px; }
   .about-info-link { gap: 9px; }
 }
+
+/* ===== Profil pemain, avatar, dan rank ===== */
+.profile-avatar { display: grid; place-items: center; overflow: hidden; flex: none; border-radius: 50%; background: #e6ddff; color: #6e51cf; }
+.profile-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.profile-avatar-fallback { display: grid; place-items: center; width: 100%; height: 100%; font: 700 19px/1 var(--heading); }
+.profile-avatar.player-avatar { width: 42px; height: 42px; border-radius: 12px; }
+.profile-avatar-large { width: 84px; height: 84px; border-radius: 24px; border: 3px solid #fff; box-shadow: 0 10px 24px #51437f22; }
+.mini-avatars span { overflow: hidden; padding: 0; }
+.mini-avatars img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+
+.rank-badge { position: relative; display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px; border-radius: 999px; border: 1px solid #e4e0ee; color: #6b6478; background: #f2f0f7; font-size: 10px; font-weight: 800; letter-spacing: .2px; white-space: nowrap; }
+.rank-badge.rank-compact { padding: 2px 7px; font-size: 8.5px; gap: 3px; }
+.rank-bling-1 { color: #6a4fd0; background: linear-gradient(120deg, #efe9ff, #f7f2ff); border-color: #d9ccff; }
+.rank-bling-2 { color: #b06a1f; background: linear-gradient(120deg, #ffefcf, #fff7e6); border-color: #f3d9a4; box-shadow: 0 2px 10px #e8b45c33; }
+.rank-bling-3 { color: #8a4fd0; background: linear-gradient(120deg, #efe2ff, #ffe9f6, #e2f4ff); background-size: 220% 220%; border-color: #d9b8ff; box-shadow: 0 3px 14px #b06ae833; animation: rank-shift 5s ease-in-out infinite; }
+.rank-bling-4 { color: #a15c00; background: linear-gradient(100deg, #ffd977, #fff3c9, #ffd977); background-size: 240% 100%; border-color: #e8b64c; box-shadow: 0 4px 16px #e8a93e4d; animation: rank-shine 3.2s linear infinite; }
+.rank-bling-5 { color: #fff; background: linear-gradient(110deg, #7a54e8, #c04fd8, #e8659a, #e8a23e, #5fbf8f, #7a54e8); background-size: 320% 100%; border-color: #ffffff66; box-shadow: 0 5px 22px #a24fd855; animation: rank-shift 4s linear infinite; }
+.rank-bling-6 { color: #fff; background: linear-gradient(110deg, #ff5f8f, #ffb347, #ffe66d, #6be8a2, #5fa8ff, #b06aff, #ff5f8f); background-size: 420% 100%; border-color: #ffffff88; text-shadow: 0 1px 2px #00000033; animation: rank-shift 3.2s linear infinite, rank-glow 2.4s ease-in-out infinite; }
+.rank-sparkle { position: absolute; color: #ffd76b; font-size: 9px; line-height: 1; text-shadow: 0 0 6px #ffcf5c; animation: sparkle-pop 1.8s ease-in-out infinite; pointer-events: none; }
+.rank-bling-5 .rank-sparkle, .rank-bling-6 .rank-sparkle { color: #fff; text-shadow: 0 0 7px #ffffffcc; }
+.rank-sparkle.s1 { top: -7px; right: -4px; }
+.rank-sparkle.s2 { bottom: -7px; left: -5px; animation-delay: .5s; }
+.rank-sparkle.s3 { top: -8px; left: 32%; animation-delay: 1s; }
+.rank-sparkle.s4 { bottom: -8px; right: 26%; animation-delay: 1.4s; }
+
+@keyframes rank-shift { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+@keyframes rank-shine { 0% { background-position: 120% 0; } 100% { background-position: -120% 0; } }
+@keyframes rank-glow { 0%, 100% { box-shadow: 0 5px 18px #a24fd855; } 50% { box-shadow: 0 5px 30px #ff5f8f88, 0 0 18px #ffe66d66; } }
+@keyframes sparkle-pop { 0%, 100% { transform: scale(.7) rotate(0deg); opacity: .35; } 50% { transform: scale(1.15) rotate(25deg); opacity: 1; } }
+
+/* ===== Kartu profil ===== */
+.profile-card { display: grid; gap: 13px; margin-top: 14px; }
+.profile-card-hero { display: flex; gap: 14px; align-items: center; padding: 16px; border: 1px solid #ece5ff; border-radius: 16px; background: linear-gradient(125deg, #f4efff, #fff8ec); }
+.profile-card-id { flex: 1; min-width: 0; }
+.profile-card-id h3 { color: #45375f; font: 700 19px/1.2 var(--heading); margin: 0 0 7px; overflow-wrap: anywhere; }
+.profile-card-id h3 small { color: #a79fac; font-weight: 500; font-size: 11px; }
+.rank-progress { position: relative; margin-top: 10px; height: 7px; border-radius: 99px; background: #e9e4f5; }
+.rank-progress > span { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, #8a63f0, #c86df0); }
+.rank-progress small { display: block; margin-top: 6px; color: #9b91ad; font-size: 9px; }
+.profile-stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; }
+.profile-stat { display: grid; justify-items: center; gap: 3px; padding: 12px 6px; border: 1px solid #f0edf5; border-radius: 12px; background: #fbfaff; text-align: center; }
+.profile-stat svg { color: #a18ae8; }
+.profile-stat strong { color: #4f4264; font: 700 17px/1 var(--heading); }
+.profile-stat span { color: #a29aab; font-size: 8.5px; }
+.profile-dialog { max-width: 460px; }
+.player-profile-link { flex: none; padding: 7px 12px; border: 1px solid #e2d9fb; border-radius: 9px; background: #f6f2ff; color: #6b4fd8; font-size: 10px; font-weight: 800; transition: background .2s, transform .2s; }
+.player-profile-link:hover { background: #ede5ff; transform: translateY(-1px); }
+
+/* ===== Avatar picker ===== */
+.avatar-picker { margin: 18px 0 2px; }
+.avatar-picker .field-title { display: block; margin-bottom: 9px; color: #6c6382; font-size: 10px; font-weight: 800; letter-spacing: .4px; }
+.avatar-options { display: grid; grid-template-columns: repeat(6, 1fr); gap: 9px; }
+.avatar-option { padding: 3px; border: 2px solid #eee9f8; border-radius: 14px; background: #fff; overflow: hidden; transition: transform .2s, border-color .2s, box-shadow .2s; }
+.avatar-option img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 10px; }
+.avatar-option:hover { transform: translateY(-2px); }
+.avatar-option.selected { border-color: var(--purple); box-shadow: 0 6px 16px #7959e833; }
+
+/* ===== Animasi juara ===== */
+.champion-celebration { position: relative; margin: 20px 0 6px; }
+.champion-self .champion-banner { border-color: #e8b45c; box-shadow: 0 22px 60px #d99a2e3b; }
+.confetti { position: absolute; inset: -80px -12px 0; overflow: hidden; pointer-events: none; }
+.confetti span { position: absolute; top: -18px; border-radius: 3px; opacity: 0; animation-name: confetti-fall; animation-timing-function: ease-in; animation-iteration-count: infinite; }
+.confetti .confetti-dot { border-radius: 50%; }
+@keyframes confetti-fall {
+  0% { transform: translateY(-12px) rotate(0deg); opacity: 0; }
+  12% { opacity: 1; }
+  100% { transform: translateY(360px) rotate(540deg); opacity: 0; }
+}
+.champion-banner { position: relative; display: flex; align-items: center; gap: 18px; padding: 20px 26px; border: 2px solid #f6d98a; border-radius: 20px; background: linear-gradient(120deg, #fff7e0, #ffe9f2 45%, #efe6ff); box-shadow: 0 18px 44px #c58a2e26; overflow: hidden; }
+.champion-banner::before { content: '✦'; position: absolute; right: 20px; top: 12px; color: #e8b45c; font-size: 16px; animation: sparkle-pop 1.8s ease-in-out infinite; }
+.champion-banner::after { content: '✦'; position: absolute; right: 48px; top: 30px; color: #c58ee8; font-size: 11px; animation: sparkle-pop 1.8s ease-in-out .6s infinite; }
+.champion-art { width: 112px; height: 112px; flex: none; object-fit: contain; animation: champion-bounce 2.6s ease-in-out infinite; }
+@keyframes champion-bounce { 0%, 100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-9px) rotate(2deg); } }
+.champion-copy { min-width: 0; }
+.champion-kicker { color: #b07a1c; font-size: 9px; font-weight: 850; letter-spacing: 1.6px; }
+.champion-title { margin: 7px 0 9px; font: 800 clamp(26px, 4vw, 38px)/1.05 var(--heading); letter-spacing: -1px; background: linear-gradient(110deg, #b8860b, #e8a23e, #d96b2f, #b8860b); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: rank-shift 4s linear infinite; overflow-wrap: anywhere; }
+.champion-copy p { margin: 0 0 11px; color: #7d6f8b; font-size: 12px; line-height: 1.7; }
+
+/* ===== Papan rank di landing ===== */
+.rank-showcase-section { padding: 30px 0 6px; }
+.rank-showcase { display: grid; grid-template-columns: 1.15fr .85fr; gap: 28px; align-items: center; padding: 36px 40px; }
+.rank-showcase-copy h2 { margin: 14px 0 12px; color: var(--ink); font-family: var(--heading); font-size: clamp(28px, 3.2vw, 40px); line-height: 1.12; letter-spacing: -1.3px; }
+.rank-showcase-copy p { max-width: 480px; margin: 0 0 18px; color: #777288; font-size: 13px; line-height: 1.9; }
+.rank-ladder { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 19px; }
+.rank-perks { display: flex; flex-wrap: wrap; gap: 15px; color: #6c6382; font-size: 11px; font-weight: 700; }
+.rank-perks span { display: inline-flex; align-items: center; gap: 6px; }
+.rank-perks svg { color: var(--purple); }
+.rank-showcase-art img { display: block; width: 100%; max-width: 380px; margin-inline: auto; border-radius: 22px; box-shadow: 0 20px 48px #7c6cc51b; }
+
+.score-winner { border-color: #f0d28a !important; box-shadow: 0 14px 36px #d9a13e22; }
+.score-player .rank-badge { margin-top: 5px; }
+
+@media (max-width: 980px) {
+  .rank-showcase { grid-template-columns: 1fr; padding: 28px 24px; }
+  .rank-showcase-art { order: -1; }
+  .rank-showcase-art img { max-width: 300px; }
+}
+@media (max-width: 560px) {
+  .profile-stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .avatar-options { grid-template-columns: repeat(3, 1fr); }
+  .champion-banner { flex-direction: column; text-align: center; padding: 22px 18px; }
+  .champion-art { width: 92px; height: 92px; }
+  .profile-avatar-large { width: 68px; height: 68px; border-radius: 20px; }
+}

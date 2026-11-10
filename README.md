@@ -16,8 +16,16 @@ Pilih **Bank soal** bila ingin mencoba tanpa API key. Bank soal non-matematika j
 
 ## Profil dan pengaturan
 
-- Klik ikon **Profil** di bagian atas untuk mengubah nama panggilan dan melihat jumlah kuis yang selesai serta nilai terbaik di browser ini. Nama yang disimpan otomatis mengisi formulir pemain berikutnya. Profil dan statistik tidak disinkronkan antarperangkat dan hilang jika data situs dihapus; tidak diperlukan akun.
+- Klik ikon **Profil** di bagian atas untuk mengubah nama panggilan, memilih **avatar**, dan melihat kartu profil: rank, poin kepintaran, winrate, dan kepintaran (akurasi). Nama yang disimpan otomatis mengisi formulir pemain berikutnya. Profil dan statistik tidak disinkronkan antarperangkat dan hilang jika data situs dihapus; tidak diperlukan akun.
+- Dalam permainan berdua, ringkasan profil saling dikirim langsung antar pemain. Klik tombol **Profil** di kartu pemain (ruang tunggu maupun layar hasil) untuk melihat profil teman, termasuk rank dan winrate-nya.
 - Klik ikon **Pengaturan** untuk mengatur efek suara dan membuka **Tentang web**. Pengaturan berlaku di browser ini dan dapat diubah saat kuis berlangsung.
+
+## Rank kepintaran dan animasi juara
+
+- Setiap permainan menambah **poin kepintaran**: 10 poin per jawaban benar, bonus menang +30 / seri +15 / kalah +5, dan bonus +20 bila semua jawaban benar.
+- Poin menentukan kelas rank: **Tunas Bintang** (0), **Bintang Muda** (100), **Bintang Terang** (300), **Bintang Cemerlang** (700), **Bintang Gemilang** (1500), **Bintang Agung** (2500), dan **Galaksi Cendekia** (4000). Semakin tinggi rank, semakin meriah efek "bling" lencananya — efek ini terlihat oleh pemain lain saat mereka membuka profilmu.
+- **Winrate** dihitung dari permainan berdua (menang / (menang + seri + kalah)), dan **kepintaran** adalah persentase jawaban benar dari seluruh soal yang pernah dijawab di perangkat itu.
+- Pada layar hasil, pemenang ronde dirayakan dengan **animasi juara**: konfeti, piala, dan nama pemenang. Tidak ada animasi juara saat skor berakhir seri.
 
 ## Soal Groq dan variasi
 

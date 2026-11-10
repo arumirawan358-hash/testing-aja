@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, BookOpen, Check, ChevronRight, CircleHelp, GraduationCap, LockKeyhole, Settings2, Sparkles, Trophy, UserRound, UsersRound, Volume2, X } from 'lucide-react'
 import { useSound } from './SoundContext.jsx'
+import { Avatar, ProfileCard } from './ProfileCard.jsx'
+import { AVATARS, avatarSrc } from '../data/avatars.js'
+import { toViewProfile } from '../lib/ranks.js'
 
 function Switch({ label, checked, onChange, silent = false }) {
   return <button type="button" className="preference-switch" role="switch" aria-label={label} aria-checked={checked} onClick={onChange} data-sound={silent ? 'none' : undefined}>
@@ -8,25 +11,29 @@ function Switch({ label, checked, onChange, silent = false }) {
   </button>
 }
 
-function ProfileView({ profile, saveName }) {
+function ProfileView({ profile, saveName, saveAvatar }) {
   const [name, setName] = useState(profile.name)
   const [feedback, setFeedback] = useState(null)
-  const initial = Array.from(profile.name.trim())[0]?.toLocaleUpperCase('id-ID')
   function save(event) {
     event.preventDefault()
     const error = saveName(name)
     setFeedback(error ? { error: true, text: error } : { error: false, text: 'Profil berhasil disimpan di browser ini.' })
   }
   return <div className="panel-content">
-    <div className="profile-hero"><div className="profile-avatar">{initial || <UserRound size={30} />}</div><div><span className="panel-kicker">PROFIL BELAJAR</span><h3>{profile.name || 'Teman belajar'}</h3><p>Profil sederhana, tanpa perlu membuat akun.</p></div></div>
+    <div className="profile-hero"><Avatar avatarId={profile.avatar} name={profile.name} className="profile-avatar-large" /><div><span className="panel-kicker">PROFIL BELAJAR</span><h3>{profile.name || 'Teman belajar'}</h3><p>Profil sederhana, tanpa perlu membuat akun.</p></div></div>
+    <div className="avatar-picker" role="radiogroup" aria-label="Pilih avatar">
+      <span className="field-title">Pilih avatar</span>
+      <div className="avatar-options">{AVATARS.map((avatar) => <button type="button" key={avatar.id} role="radio" aria-checked={profile.avatar === avatar.id} aria-label={`Avatar ${avatar.label}`} className={`avatar-option ${profile.avatar === avatar.id ? 'selected' : ''}`} onClick={() => { saveAvatar(avatar.id); setFeedback({ error: false, text: 'Avatar dipilih!' }) }}><img src={avatarSrc(avatar.id)} alt={avatar.label} /></button>)}</div>
+    </div>
     <form className="profile-form" onSubmit={save} noValidate>
       <label className="field"><span>Nama panggilan</span><input value={name} onChange={(event) => { setName(event.target.value); setFeedback(null) }} maxLength={24} autoComplete="nickname" placeholder="Masukkan nama panggilanmu" /></label>
       <p className="panel-help">Nama ini otomatis terisi saat membuat atau bergabung ke permainan berikutnya.</p>
       {feedback && <p className={`profile-feedback ${feedback.error ? 'error' : ''}`} role={feedback.error ? 'alert' : 'status'}>{!feedback.error && <Check size={15} />}{feedback.text}</p>}
       <button type="submit" className="button button-primary profile-save">Simpan profil</button>
     </form>
+    <ProfileCard profile={toViewProfile(profile)} self />
     <div className="profile-stats" aria-label="Statistik di browser ini"><div><BookOpen size={18} /><strong>{profile.gamesPlayed}</strong><span>Kuis selesai</span></div><div><Trophy size={18} /><strong>{profile.bestScore === null ? '—' : profile.bestScore}</strong><span>Nilai terbaik</span></div></div>
-    <p className="panel-footnote"><LockKeyhole size={14} /> Profil dan statistik tersimpan di browser ini, bukan akun online. Statistik berlaku untuk perangkat ini meskipun nama diubah.</p>
+    <p className="panel-footnote"><LockKeyhole size={14} /> Profil dan statistik tersimpan di browser ini, bukan akun online. Teman bermain hanya melihat ringkasan yang dikirim langsung saat kalian terhubung.</p>
   </div>
 }
 
@@ -56,7 +63,7 @@ function AboutView({ openPanel }) {
   </div>
 }
 
-export default function PreferencesPanel({ panel, profile, hintEnabled, setHintEnabled, saveName, openPanel, closePanel }) {
+export default function PreferencesPanel({ panel, profile, hintEnabled, setHintEnabled, saveName, saveAvatar, openPanel, closePanel }) {
   const dialog = useRef(null)
   const isOpen = Boolean(panel)
   useEffect(() => {
@@ -90,7 +97,7 @@ export default function PreferencesPanel({ panel, profile, hintEnabled, setHintE
         <div><span className="panel-header-label">KUISKITA</span><h2 id="preferences-title">{title}</h2></div>
         <button type="button" className="panel-icon-button panel-close" onClick={closePanel} aria-label="Tutup"><X size={19} /></button>
       </header>
-      {panel === 'profile' ? <ProfileView profile={profile} saveName={saveName} /> : panel === 'about' ? <AboutView openPanel={openPanel} /> : <SettingsView hintEnabled={hintEnabled} setHintEnabled={setHintEnabled} openPanel={openPanel} />}
+      {panel === 'profile' ? <ProfileView profile={profile} saveName={saveName} saveAvatar={saveAvatar} /> : panel === 'about' ? <AboutView openPanel={openPanel} /> : <SettingsView hintEnabled={hintEnabled} setHintEnabled={setHintEnabled} openPanel={openPanel} />}
     </section>
   </div>
 }

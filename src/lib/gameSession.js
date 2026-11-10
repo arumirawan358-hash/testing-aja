@@ -3,6 +3,7 @@ import { generateGroqQuestions } from './groq.js'
 import { areAnswersValid, isValidQuestion, makePracticeQuestions, scoreAnswers } from './questions.js'
 import { createPeer, makeRoomCode, makeToken, roomPeerId } from './peer.js'
 import { decodeQuestions, encodeQuestions, isValidChunkText, isValidTransferSize, TRANSFER_PROTOCOL } from './questionTransfer.js'
+import { sanitizeWireProfile, toViewProfile } from './ranks.js'
 
 const TRANSFER_IDLE_MS = 45000
 const MAX_TRANSFER_ATTEMPTS = 3
@@ -19,6 +20,7 @@ const initialState = () => ({
   code: '',
   selfName: '',
   opponentName: '',
+  opponentProfile: null,
   config: null,
   connected: false,
   roomClosed: false,
@@ -102,10 +104,17 @@ export class GameSession {
     this.maxTransferAttempts = maxTransferAttempts
     this.partialQuestions = []
     this.hostAttempts = 0
+    this.selfProfile = null
   }
 
   getState = () => this.state
   subscribe = (listener) => { this.listeners.add(listener); return () => this.listeners.delete(listener) }
+
+  // Profil lokal dikirim langsung ke pemain lain; hanya bentuk ringkas yang boleh keluar.
+  setSelfProfile(profile) {
+    this.selfProfile = profile ? toViewProfile(profile) : null
+    if (this.selfProfile && this.state.connected) this.send({ type: 'profile', profile: this.selfProfile })
+  }
   patch(update) {
     this.state = { ...this.state, ...update }
     this.listeners.forEach((listener) => listener(this.state))
@@ -323,7 +332,7 @@ export class GameSession {
     }, this.connectTimeoutMs)
     connection.on('open', () => {
       if (this.connection !== connection) return
-      this.send({ type: 'join', name: this.state.selfName, token: this.selfToken, protocol: TRANSFER_PROTOCOL })
+      this.send({ type: 'join', name: this.state.selfName, token: this.selfToken, protocol: TRANSFER_PROTOCOL, profile: this.selfProfile })
     })
   }
 
@@ -412,10 +421,11 @@ export class GameSession {
     this.pending = null
     this.connection = connection
     this.guestToken = token
-    this.patch({ connected: true, opponentName: name, status: this.state.screen === 'lobby' && this.state.status !== 'preparing' ? 'joined' : this.state.status, error: '' })
+    this.patch({ connected: true, opponentName: name, opponentProfile: sanitizeWireProfile(message.profile), status: this.state.screen === 'lobby' && this.state.status !== 'preparing' ? 'joined' : this.state.status, error: '' })
     this.send({
       type: 'welcome',
       name: this.state.selfName,
+      profile: this.selfProfile,
       config: this.state.config,
       phase: this.state.screen,
       status: this.state.status,
@@ -448,11 +458,11 @@ export class GameSession {
       this.guestFinished = null
       if (generating) {
         // Do not cancel paid AI work just because the other player disconnected.
-        this.patch({ connected: false, opponentName: '', error: 'Teman terputus. Soal tetap disiapkan; minta teman bergabung lagi.' })
+        this.patch({ connected: false, opponentName: '', opponentProfile: null, error: 'Teman terputus. Soal tetap disiapkan; minta teman bergabung lagi.' })
       } else if (prepared) {
-        this.patch({ connected: false, opponentName: '', status: 'waiting', preparation: null, error: 'Teman terputus. Soal sudah siap dan akan dikirim saat teman kembali.' })
+        this.patch({ connected: false, opponentName: '', opponentProfile: null, status: 'waiting', preparation: null, error: 'Teman terputus. Soal sudah siap dan akan dikirim saat teman kembali.' })
       } else {
-        this.patch({ connected: false, opponentName: '', status: 'waiting', preparation: null, error: 'Teman terputus. Bagikan kode lagi untuk mengundangnya kembali.' })
+        this.patch({ connected: false, opponentName: '', opponentProfile: null, status: 'waiting', preparation: null, error: 'Teman terputus. Bagikan kode lagi untuk mengundangnya kembali.' })
       }
     } else {
       const error = inLobby
@@ -508,7 +518,7 @@ export class GameSession {
       const returnToLobby = this.state.screen === 'results' && message.phase === 'lobby' && !message.gameId
       this.patch({
         ...(returnToLobby ? resetRound() : {}),
-        connected: true, opponentName: cleanName(message.name), config: publicConfig(message.config),
+        connected: true, opponentName: cleanName(message.name), opponentProfile: sanitizeWireProfile(message.profile), config: publicConfig(message.config),
         opponentProgress: Number.isInteger(message.opponentProgress) ? message.opponentProgress : 0,
         opponentRematchRequested: !returnToLobby && message.phase === 'results' && message.gameId === this.state.gameId && message.rematchRequested === true,
         status: message.status === 'preparing' ? 'preparing' : this.state.screen === 'results' && !returnToLobby ? 'finished' : 'joined', error: '',
@@ -518,6 +528,11 @@ export class GameSession {
         if (this.state.screen === 'waiting' && this.state.answers.length === this.state.config.count) this.sendFinished()
       }
       if (this.state.screen === 'results' && this.state.rematchRequested) this.send({ type: 'rematch-request', gameId: this.state.gameId })
+      return
+    }
+    if (message.type === 'profile') {
+      const profile = sanitizeWireProfile(message.profile)
+      if (profile) this.patch({ opponentProfile: profile })
       return
     }
     if (message.type === 'rematch-request' && role !== 'solo' && this.state.screen === 'results' && message.gameId === this.state.gameId) {
