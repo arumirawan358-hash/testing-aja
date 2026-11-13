@@ -1,4 +1,4 @@
-import { subjectName, validateConfig } from '../data/subjects.js'
+import { getLevel, gradeLabel, subjectName, validateConfig } from '../data/subjects.js'
 import { isValidQuestion, shuffle } from './questions.js'
 
 export const GROQ_MODEL = 'openai/gpt-oss-120b'
@@ -47,8 +47,15 @@ function wait(ms, signal) {
 
 function makePrompt(config, amount, recent, batchNumber) {
   const topic = config.topic?.trim()
+  const subject = subjectName(config)
+  const level = getLevel(config.level)
+  const levelText = `jenjang ${level?.label || config.level}, ${gradeLabel(config).startsWith('Kelas') ? gradeLabel(config).toLowerCase() : gradeLabel(config)}`
+  const subjectText = subject ? `mata pelajaran ${JSON.stringify(subject)}` : 'mata pelajaran bebas sesuai permintaan'
+  const instruction = topic
+    ? ` Ikuti permintaan pembuat soal berikut secara seksama: ${JSON.stringify(topic)}. Permintaan boleh menyebutkan jenis ujian, contoh soal, tahun, atau gaya tertentu (misalnya "soal SKD 2025", "gaya UTBK", "seperti ujian sekolah"); buatlah soal dengan format, materi, gaya bahasa, dan tingkat kesulitan yang sesuai dengan contoh yang dimaksud, seperti soal-soal sejenis yang umum ditemukan.`
+    : ' Pilih materi yang relevan dengan jenjang dan mata pelajaran tersebut.'
   const avoid = recent.length ? ` Jangan ulangi atau parafrase soal berikut: ${JSON.stringify(recent.map((text) => text.slice(0, 120)))}.` : ''
-  return `Buat tepat ${amount} soal pilihan ganda berbeda untuk jenjang ${config.level}, kelas ${config.grade}, mata pelajaran ${JSON.stringify(subjectName(config))}.${topic ? ` Semua soal harus sesuai dengan topik ${JSON.stringify(topic)}.` : ' Pilih materi yang relevan dengan mata pelajaran dan kelas tersebut.'} Gunakan bahasa Indonesia yang jelas dan sesuai usia. Untuk pelajaran Bahasa Inggris, bahan soal boleh berbahasa Inggris. Setiap soal memiliki tepat empat pilihan yang berbeda, tepat satu jawaban benar dengan indeks answer 0 sampai 3, dan penjelasan singkat yang faktual. Periksa kembali jawaban dan penjelasannya. Variasikan konsep, contoh, konteks, dan posisi jawaban, tetapi jangan keluar dari materi yang dipilih. Ini bagian ${batchNumber} dari paket soal baru.${avoid} Kembalikan hanya JSON sesuai skema.`
+  return `Buat tepat ${amount} soal pilihan ganda berbeda untuk ${levelText}, ${subjectText}.${instruction} Gunakan bahasa Indonesia yang jelas dan sesuai usia. Untuk pelajaran Bahasa Inggris, bahan soal boleh berbahasa Inggris. Setiap soal memiliki tepat empat pilihan yang berbeda, tepat satu jawaban benar dengan indeks answer 0 sampai 3, dan penjelasan singkat yang faktual. Periksa kembali jawaban dan penjelasannya. Variasikan konsep, contoh, konteks, dan posisi jawaban, tetapi jangan keluar dari materi yang dipilih. Ini bagian ${batchNumber} dari paket soal baru.${avoid} Kembalikan hanya JSON sesuai skema.`
 }
 
 class UnreadableGroqResponse extends Error {

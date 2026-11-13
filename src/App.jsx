@@ -10,11 +10,13 @@ function GameApp() {
   const [state, setState] = useState(session.getState)
   const previous = useRef({ screen: state.screen, connected: state.connected })
   const { play } = useSound()
-  const { recordResult, profile } = usePreferences()
+  const { recordResult, profile, setRoomCode } = usePreferences()
   useEffect(() => {
     const unsubscribe = session.subscribe(setState)
     return () => { unsubscribe(); session.destroy() }
   }, [session])
+  // Kode ruang dibagikan ke panel Teman untuk undangan sekali klik.
+  useEffect(() => { setRoomCode(state.role === 'host' && state.screen === 'lobby' ? state.code : '') }, [state.role, state.screen, state.code, setRoomCode])
   // Profil dikirim langsung ke pemain lain setiap berubah (misal setelah menang).
   useEffect(() => { session.setSelfProfile(profile) }, [session, profile])
   useEffect(() => { window.scrollTo({ top: 0, behavior: 'instant' }) }, [state.screen])

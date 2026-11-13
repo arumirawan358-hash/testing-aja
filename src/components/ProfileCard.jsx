@@ -1,14 +1,19 @@
 import { useEffect, useRef } from 'react'
 import { Crown, Gamepad2, Percent, Sparkles, Target, Trophy, UserRound, X, Zap } from 'lucide-react'
 import { avatarSrc } from '../data/avatars.js'
+import { DEFAULT_FRAME, isFrameId } from '../data/frames.js'
 
-// Avatar pemain: gambar AI bila dipilih, huruf awal bila belum ada gambar.
-export function Avatar({ avatarId, name, className = '' }) {
+// Avatar pemain: gambar AI dengan bingkai beranimasi, huruf awal bila kosong.
+export function Avatar({ avatarId, name, frame, className = '' }) {
   const initial = Array.from((name || '').trim())[0]?.toLocaleUpperCase('id-ID')
-  return <span className={`profile-avatar ${className}`}>
-    {avatarId
-      ? <img src={avatarSrc(avatarId)} alt="" />
-      : <span className="profile-avatar-fallback">{initial || <UserRound size={20} />}</span>}
+  const frameClass = `frame-${isFrameId(frame) ? frame : DEFAULT_FRAME}`
+  return <span className={`avatar-frame ${frameClass} ${className}`}>
+    <span className="profile-avatar">
+      {avatarId
+        ? <img src={avatarSrc(avatarId)} alt="" />
+        : <span className="profile-avatar-fallback">{initial || <UserRound size={20} />}</span>}
+    </span>
+    <span className="frame-fx" aria-hidden="true" />
   </span>
 }
 
@@ -30,13 +35,13 @@ function StatTile({ icon: Icon, value, label }) {
   return <div className="profile-stat"><Icon size={16} /><strong>{value}</strong><span>{label}</span></div>
 }
 
-// Kartu profil lengkap: avatar, rank + bling, winrate, dan kepintaran.
+// Kartu profil lengkap: avatar + bingkai, rank + bling, winrate, dan kepintaran.
 export function ProfileCard({ profile, self = false }) {
   if (!profile) return null
   const rank = profile.rank
   return <div className="profile-card">
     <div className="profile-card-hero">
-      <Avatar avatarId={profile.avatar} name={profile.name} className="profile-avatar-large" />
+      <Avatar avatarId={profile.avatar} name={profile.name} frame={profile.frame} className="profile-avatar-large" />
       <div className="profile-card-id">
         <h3>{profile.name || 'Teman belajar'} {self && <small>(kamu)</small>}</h3>
         <RankBadge rank={rank} />
