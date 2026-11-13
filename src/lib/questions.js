@@ -31,7 +31,7 @@ function numericQuestion(prompt, correct, explanation, random) {
   }
 }
 
-function makeMathQuestion(grade, kind, random) {
+export function makeMathQuestion(grade, kind, random) {
   const n = (min, max) => randomInt(min, max, random)
   let a, b, c, result, prompt, explanation
 

@@ -97,3 +97,30 @@ describe('statistik profil lengkap', () => {
     expect(profileSummary(emptyProfile())).toMatchObject({ winRate: 0, accuracy: null })
   })
 })
+
+describe('riwayat permainan per ruang', () => {
+  it('menyimpan hasil akhir setiap ruang dan membatasi jumlahnya', async () => {
+    const { saveGameHistory, loadGameHistory, GAME_HISTORY_KEY } = await import('../src/lib/preferences.js')
+    const storage = (() => { const data = new Map(); return { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => data.set(key, value), removeItem: (key) => data.delete(key) } })()
+    const entry = {
+      at: 123, mode: 'buzzer', roomCode: 'S1A2B3', category: 'Matematika', method: 'mc', gameId: 'g-1',
+      standings: [{ name: 'Bintang', points: 30, correct: 2, wrong: 1, rank: 1 }, { name: 'Mentari', points: 12, correct: 1, wrong: 2, rank: 2 }],
+    }
+    saveGameHistory(entry, storage)
+    saveGameHistory({ ...entry, gameId: 'g-2', roomCode: 'S9Z8Y7' }, storage)
+    const history = loadGameHistory(storage)
+    expect(history).toHaveLength(2)
+    expect(history[0].standings[0]).toEqual({ name: 'Bintang', points: 30, correct: 2, wrong: 1, rank: 1 })
+    expect(JSON.parse(storage.getItem(GAME_HISTORY_KEY))).toHaveLength(2)
+    for (let index = 0; index < 25; index += 1) saveGameHistory({ ...entry, gameId: `g-${index}` }, storage)
+    expect(loadGameHistory(storage).length).toBeLessThanOrEqual(20)
+  })
+
+  it('mengabaikan entri rusak', async () => {
+    const { saveGameHistory, loadGameHistory } = await import('../src/lib/preferences.js')
+    const storage = (() => { const data = new Map(); return { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) } })()
+    expect(saveGameHistory(null, storage)).toEqual([])
+    expect(saveGameHistory({ standings: 'rusak' }, storage).every((item) => Array.isArray(item.standings))).toBe(true)
+    expect(loadGameHistory(storage).length).toBeLessThanOrEqual(1)
+  })
+})

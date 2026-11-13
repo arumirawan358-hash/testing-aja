@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { cleanName, validateName } from '../data/subjects.js'
 import { isAvatarId } from '../data/avatars.js'
 import { isFrameId } from '../data/frames.js'
-import { HINT_STORAGE_KEY, PROFILE_STORAGE_KEY, loadHintEnabled, loadProfile, recordCompletedGame, sanitizeProfile, saveHintEnabled, saveProfile } from '../lib/preferences.js'
+import { GAME_HISTORY_KEY, HINT_STORAGE_KEY, PROFILE_STORAGE_KEY, loadGameHistory, loadHintEnabled, loadProfile, recordCompletedGame, sanitizeProfile, saveGameHistory as persistGameHistory, saveHintEnabled, saveProfile } from '../lib/preferences.js'
 import PreferencesPanel from './PreferencesPanel.jsx'
 
 const PreferencesContext = createContext(null)
@@ -12,6 +12,7 @@ export function PreferencesProvider({ children }) {
   const [hintEnabled, setHintEnabled] = useState(loadHintEnabled)
   const [panel, setPanel] = useState(null)
   const [roomCode, setRoomCode] = useState('')
+  const [gameHistory, setGameHistory] = useState(loadGameHistory)
   useEffect(() => { saveProfile(profile) }, [profile])
   useEffect(() => { saveHintEnabled(hintEnabled) }, [hintEnabled])
   useEffect(() => {
@@ -20,6 +21,7 @@ export function PreferencesProvider({ children }) {
       if (event.key === PROFILE_STORAGE_KEY) {
         try { setProfile(sanitizeProfile(JSON.parse(event.newValue || 'null'))) } catch { setProfile(sanitizeProfile(null)) }
       }
+      if (event.key === GAME_HISTORY_KEY) setGameHistory(loadGameHistory())
     }
     window.addEventListener('storage', sync)
     return () => window.removeEventListener('storage', sync)
@@ -44,11 +46,14 @@ export function PreferencesProvider({ children }) {
   const recordResult = useCallback((gameId, score, outcome) => {
     setProfile((current) => recordCompletedGame(current, gameId, score, outcome))
   }, [])
+  const saveGameHistory = useCallback((entry) => {
+    setGameHistory(persistGameHistory(entry))
+  }, [])
   const openPanel = useCallback((name) => {
     if (['profile', 'settings', 'about', 'friends'].includes(name)) setPanel(name)
   }, [])
   const closePanel = useCallback(() => setPanel(null), [])
-  const value = useMemo(() => ({ profile, hintEnabled, setHintEnabled, saveName, saveAvatar, saveFrame, recordResult, openPanel, closePanel, roomCode, setRoomCode }), [profile, hintEnabled, saveName, saveAvatar, saveFrame, recordResult, openPanel, closePanel, roomCode])
+  const value = useMemo(() => ({ profile, hintEnabled, setHintEnabled, saveName, saveAvatar, saveFrame, recordResult, saveGameHistory, gameHistory, openPanel, closePanel, roomCode, setRoomCode }), [profile, hintEnabled, saveName, saveAvatar, saveFrame, recordResult, saveGameHistory, gameHistory, openPanel, closePanel, roomCode])
 
   return <PreferencesContext.Provider value={value}>
     {children}

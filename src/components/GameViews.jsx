@@ -27,7 +27,7 @@ function Notice({ state, session }) {
   return <div className="notice" role="alert"><AlertCircle size={19} /><span>{state.error}</span>{canReconnect && <button onClick={() => session.reconnect()}><RotateCcw size={14} /> Hubungkan lagi</button>}</div>
 }
 
-function makeShareLink(code) {
+export function makeShareLink(code) {
   const url = new URL(window.location.href)
   url.search = ''
   url.searchParams.set('room', code)
@@ -35,7 +35,7 @@ function makeShareLink(code) {
   return url.toString()
 }
 
-async function copyText(text) {
+export async function copyText(text) {
   if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text)
   const input = document.createElement('textarea')
   input.value = text

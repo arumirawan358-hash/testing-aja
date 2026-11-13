@@ -219,7 +219,10 @@ export class GameSession {
     if (error) { this.patch({ error }); return false }
     this.cleanup()
     this.aiKey = config.source === 'groq' ? apiKey.trim() : ''
-    this.patch({ ...initialState(), screen: 'lobby', role: 'host', status: 'connecting', code: makeRoomCode(), selfName: cleanName(name), config: publicConfig(config) })
+    // Kode "S..." dipakai ruang mode Siapa Cepat Dia Menjawab; duel bebas huruf S di depan.
+    let duelCode = makeRoomCode()
+    while (duelCode.startsWith('S')) duelCode = makeRoomCode()
+    this.patch({ ...initialState(), screen: 'lobby', role: 'host', status: 'connecting', code: duelCode, selfName: cleanName(name), config: publicConfig(config) })
     this.openHostPeer()
     return true
   }

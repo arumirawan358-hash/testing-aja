@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { CUSTOM_SUBJECT, DEFAULT_CONFIG, gradeLabel, LEVELS } from '../src/data/subjects.js'
-import { generateGroqQuestions, GROQ_MODEL, questionFingerprint } from '../src/lib/groq.js'
+import { generateBuzzerQuestions, generateGroqQuestions, GROQ_MODEL, questionFingerprint } from '../src/lib/groq.js'
 import { isValidQuestion } from '../src/lib/questions.js'
 
 const fakeKey = 'private-key-for-test-only'
@@ -226,5 +226,37 @@ describe('Groq langsung dari browser', () => {
       await vi.advanceTimersByTimeAsync(90000)
       await assertion
     } finally { vi.useRealTimers() }
+  })
+})
+
+describe('Groq untuk mode Siapa Cepat Dia Menjawab', () => {
+  it('membuat soal sesuai kategori/metode, menyertakan jawaban natural, dan key hanya di header', async () => {
+    const raw = {
+      questions: [
+        { prompt: 'Siapa presiden pertama Indonesia?', kind: 'mc', options: ['Soekarno', 'Soehatto', 'Hatta', 'Yudhoyono'], answerIndex: 0, answerText: 'Soekarno', accepted: [], naturalAnswer: 'Soekarno', explanation: 'Presiden pertama.' },
+        { prompt: 'Berapa 9 x 9?', kind: 'typing', options: ['', '', '', ''], answerIndex: 0, answerText: '81', accepted: ['81', 'delapan puluh satu'], naturalAnswer: 'kalau nggak salah sih 81', explanation: '9 x 9 = 81.' },
+      ],
+    }
+    const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ choices: [{ message: { content: JSON.stringify(raw) } }] }) }))
+    const questions = await generateBuzzerQuestions({ category: 'Pengetahuan Umum', method: 'random', count: 2 }, `  ${fakeKey}  `, { fetchImpl, random: () => 0.5 })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    const [url, request] = fetchImpl.mock.calls[0]
+    expect(url).toBe('https://api.groq.com/openai/v1/chat/completions')
+    expect(request.headers.Authorization).toBe(`Bearer ${fakeKey}`)
+    expect(request.body).not.toContain(fakeKey)
+    expect(request.body).toContain('Pengetahuan Umum')
+    expect(request.body).toContain('campurkan soal pilihan ganda')
+    expect(questions).toHaveLength(2)
+    expect(questions[0].kind).toBe('mc')
+    expect(questions[1].naturalAnswer).toContain('81')
+    expect(questions[1].accepted).toContain('81')
+  })
+
+  it('menolak key kosong dan respons rusak tanpa membocorkan key', async () => {
+    await expect(generateBuzzerQuestions({ category: 'IPA', method: 'mc', count: 2 }, '', { fetchImpl: vi.fn() })).rejects.toThrow(/API key/)
+    const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ choices: [{ message: { content: 'bukan json' } }] }) }))
+    const failure = await generateBuzzerQuestions({ category: 'IPA', method: 'mc', count: 1 }, fakeKey, { fetchImpl }).then(() => null, (error) => error)
+    expect(failure.message).toMatch(/belum dapat dibaca/)
+    expect(failure.message).not.toContain(fakeKey)
   })
 })

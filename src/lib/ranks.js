@@ -96,6 +96,7 @@ export function sanitizeWireProfile(value) {
     correctAnswers: value.correctAnswers,
     totalAnswered: value.totalAnswered,
   })
-  view.accuracy = Number.isFinite(Number(value.accuracy)) ? clampInt(value.accuracy, 0, 100, null) : view.accuracy
+  // Nilai "belum ada" (null) tidak boleh diangka-nol-kan: Number(null) === 0.
+  view.accuracy = typeof value.accuracy === 'number' && Number.isFinite(value.accuracy) ? clampInt(value.accuracy, 0, 100, null) : view.accuracy
   return view
 }

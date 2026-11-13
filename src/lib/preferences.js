@@ -108,3 +108,47 @@ export function profileSummary(profile) {
     accuracy: accuracyOf(current.correctAnswers, current.totalAnswered),
   }
 }
+
+// --- Riwayat permainan per ruang -------------------------------------------
+
+export const GAME_HISTORY_KEY = 'kuiskita:history'
+const MAX_GAME_HISTORY = 20
+
+function sanitizeHistoryEntry(entry) {
+  if (!entry || typeof entry !== 'object') return null
+  const standings = Array.isArray(entry.standings)
+    ? entry.standings.slice(0, 8).map((player) => ({
+      name: typeof player?.name === 'string' ? player.name.slice(0, 24) : '',
+      points: Number.isInteger(player?.points) ? player.points : 0,
+      correct: Number.isInteger(player?.correct) ? player.correct : 0,
+      wrong: Number.isInteger(player?.wrong) ? player.wrong : 0,
+      rank: Number.isInteger(player?.rank) ? player.rank : 0,
+    })).filter((player) => player.name)
+    : []
+  return {
+    at: Number.isFinite(entry.at) ? entry.at : 0,
+    mode: entry.mode === 'buzzer' ? 'buzzer' : 'duel',
+    roomCode: typeof entry.roomCode === 'string' ? entry.roomCode.slice(0, 6) : '',
+    category: typeof entry.category === 'string' ? entry.category.slice(0, 40) : '',
+    method: typeof entry.method === 'string' ? entry.method.slice(0, 12) : '',
+    gameId: typeof entry.gameId === 'string' ? entry.gameId.slice(0, 100) : '',
+    standings,
+  }
+}
+
+export function loadGameHistory(storage = browserStorage()) {
+  try {
+    const raw = JSON.parse(storage?.getItem(GAME_HISTORY_KEY) || '[]')
+    return (Array.isArray(raw) ? raw : []).map(sanitizeHistoryEntry).filter(Boolean)
+  } catch { return [] }
+}
+
+export function saveGameHistory(entry, storage = browserStorage()) {
+  try {
+    const clean = sanitizeHistoryEntry(entry)
+    if (!clean) return loadGameHistory(storage)
+    const next = [...loadGameHistory(storage), clean].slice(-MAX_GAME_HISTORY)
+    storage?.setItem(GAME_HISTORY_KEY, JSON.stringify(next))
+    return next
+  } catch { return loadGameHistory(storage) }
+}

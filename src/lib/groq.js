@@ -228,3 +228,147 @@ export async function generateGroqQuestions(config, apiKey, { onProgress = () =>
   }
   return questions
 }
+
+// --- Mode "Siapa Cepat Dia Menjawab" ---------------------------------------
+
+const buzzerSchema = {
+  type: 'object',
+  properties: {
+    questions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string' },
+          kind: { type: 'string', enum: ['mc', 'typing'] },
+          options: { type: 'array', items: { type: 'string' } },
+          answerIndex: { type: 'integer' },
+          answerText: { type: 'string' },
+          accepted: { type: 'array', items: { type: 'string' } },
+          naturalAnswer: { type: 'string' },
+          explanation: { type: 'string' },
+        },
+        required: ['prompt', 'kind', 'options', 'answerIndex', 'answerText', 'accepted', 'naturalAnswer', 'explanation'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['questions'],
+  additionalProperties: false,
+}
+
+function makeBuzzerPrompt({ category, method, amount, topic }, batchNumber) {
+  const kindText = method === 'typing'
+    ? 'semua soal berupa pertanyaan jawaban ketikan singkat (kind "typing")'
+    : method === 'random'
+      ? 'campurkan soal pilihan ganda (kind "mc") dan jawaban ketikan (kind "typing") secara acak'
+      : 'semua soal berupa pilihan ganda A/B/C/D (kind "mc")'
+  const methodFields = method === 'typing'
+    ? 'Untuk setiap soal isi: kind "typing", options empat string kosong, answerIndex 0, answerText jawaban benar yang singkat, accepted 1 sampai 5 variasi jawaban benar yang wajar, naturalAnswer satu kalimat jawaban yang terasa diketik manusia (natural, tidak robotik, tetap memuat jawaban benar), dan explanation singkat.'
+    : method === 'random'
+      ? 'Untuk soal "mc": isi options tepat empat pilihan berbeda dan answerIndex 0-3. Untuk soal "typing": options empat string kosong, answerIndex 0, answerText jawaban benar singkat, accepted 1-5 variasi, naturalAnswer kalimat jawaban yang terasa diketik manusia. Selalu isi answerText dengan teks jawaban benar.'
+      : 'Untuk setiap soal isi: kind "mc", options tepat empat pilihan berbeda, answerIndex 0-3, answerText sama dengan teks pilihan yang benar, accepted array kosong, naturalAnswer sama dengan teks jawaban benar.'
+  const instruction = topic?.trim()
+    ? ` Ikuti juga permintaan pembuat soal berikut: ${JSON.stringify(topic.trim())}.`
+    : ''
+  return `Buat tepat ${amount} pertanyaan kuis adu cepat untuk kategori ${JSON.stringify(category)} dengan tingkat kesulitan bervariasi (mudah, sedang, sulit) dan bahasa Indonesia yang jelas (soal Bahasa Inggris boleh berbahasa Inggris). ${kindText}.${methodFields}${instruction} Setiap soal berbeda, faktual, dan memiliki explanation singkat. Ini bagian ${batchNumber} dari paket soal. Kembalikan hanya JSON sesuai skema.`
+}
+
+function normalizeBuzzerAiQuestion(raw, index) {
+  if (!raw || typeof raw !== 'object') return null
+  const prompt = typeof raw.prompt === 'string' ? raw.prompt.trim() : ''
+  const explanation = typeof raw.explanation === 'string' ? raw.explanation.trim() : ''
+  if (!prompt) return null
+  if (raw.kind === 'mc') {
+    const options = Array.isArray(raw.options) ? raw.options.map((option) => String(option ?? '').trim()) : []
+    const answerIndex = Number(raw.answerIndex)
+    if (options.length !== 4 || options.some((option) => !option)) return null
+    if (!Number.isInteger(answerIndex) || answerIndex < 0 || answerIndex > 3) return null
+    return { id: `bz-ai-${index + 1}`, kind: 'mc', prompt, options, answerIndex, accepted: [], answerText: options[answerIndex], naturalAnswer: typeof raw.naturalAnswer === 'string' && raw.naturalAnswer.trim() ? raw.naturalAnswer.trim() : options[answerIndex], explanation }
+  }
+  if (raw.kind === 'typing') {
+    const answerText = typeof raw.answerText === 'string' ? raw.answerText.trim() : ''
+    const accepted = Array.isArray(raw.accepted) ? raw.accepted.map((item) => String(item ?? '').trim()).filter(Boolean) : []
+    if (!answerText) return null
+    const list = [...new Set([answerText, ...accepted])].slice(0, 5)
+    return { id: `bz-ai-${index + 1}`, kind: 'typing', prompt, options: [], answerIndex: 0, answerText, accepted: list, naturalAnswer: typeof raw.naturalAnswer === 'string' && raw.naturalAnswer.trim() ? raw.naturalAnswer.trim() : answerText, explanation }
+  }
+  return null
+}
+
+export async function generateBuzzerQuestions(settings, apiKey, { signal, fetchImpl = globalThis.fetch, random = Math.random, onProgress = () => {} } = {}) {
+  const key = String(apiKey || '').trim()
+  if (!key) throw new Error('Masukkan API key Groq terlebih dahulu, ya.')
+  const amount = Math.max(1, Math.min(50, Number(settings.count) || 1))
+  const questions = []
+  while (questions.length < amount) {
+    const batch = Math.min(8, amount - questions.length)
+    onProgress({ done: questions.length, total: amount })
+    const body = JSON.stringify({
+      model: GROQ_MODEL,
+      messages: [
+        { role: 'system', content: 'Kamu adalah pembawa acara kuis Indonesia yang seru dan teliti. Buat pertanyaan faktual yang aman untuk semua umur dan ikuti skema JSON.' },
+        { role: 'user', content: makeBuzzerPrompt({ ...settings, amount: batch }, questions.length / 8 + 1) },
+      ],
+      temperature: 0.9,
+      seed: Math.floor(random() * 2147483647),
+      max_completion_tokens: Math.max(MIN_COMPLETION_TOKENS, batch * 140),
+      reasoning_effort: 'medium',
+      response_format: { type: 'json_schema', json_schema: { name: 'buzzer_questions', strict: true, schema: buzzerSchema } },
+    })
+    let response
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (signal?.aborted) throw new DOMException('Dibatalkan', 'AbortError')
+      const request = new AbortController()
+      const abort = () => request.abort()
+      signal?.addEventListener('abort', abort, { once: true })
+      let timedOut = false
+      const timeout = setTimeout(() => { timedOut = true; request.abort() }, REQUEST_TIMEOUT_MS)
+      try {
+        response = await fetchImpl(GROQ_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+          body,
+          signal: request.signal,
+          credentials: 'omit',
+          cache: 'no-store',
+          referrerPolicy: 'no-referrer',
+        })
+      } catch (error) {
+        if (signal?.aborted) throw new DOMException('Dibatalkan', 'AbortError')
+        if (timedOut) throw new Error('Groq merespons terlalu lama. Periksa koneksi dan coba lagi.')
+        throw new Error('Tidak dapat menghubungi Groq. Periksa koneksi internet dan coba lagi.')
+      } finally {
+        clearTimeout(timeout)
+        signal?.removeEventListener('abort', abort)
+      }
+      if ((response.status === 429 || response.status >= 500) && attempt < 2) {
+        const retrySeconds = Number(response.headers?.get?.('retry-after'))
+        const fallback = response.status === 429 ? (attempt === 0 ? 15000 : 45000) : 1500 * (attempt + 1)
+        await wait(retrySeconds > 0 ? Math.min(retrySeconds, 60) * 1000 : fallback, signal)
+        continue
+      }
+      break
+    }
+    if (!response.ok) {
+      if (await isRequestTooLarge(response)) throw new GroqRequestTooLarge()
+      throw new Error(friendlyHttpError(response.status))
+    }
+    let rawList
+    try {
+      const payload = await response.json()
+      const text = payload?.choices?.[0]?.message?.content
+      if (typeof text !== 'string' || text.length > 200000) throw new Error('invalid')
+      const parsed = JSON.parse(text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''))
+      if (!Array.isArray(parsed.questions)) throw new Error('missing')
+      rawList = parsed.questions
+    } catch {
+      throw new UnreadableGroqResponse()
+    }
+    const normalized = rawList.map((raw, index) => normalizeBuzzerAiQuestion(raw, questions.length + index)).filter(Boolean)
+    if (normalized.length === 0) throw new UnreadableGroqResponse()
+    questions.push(...normalized.slice(0, batch))
+  }
+  onProgress({ done: amount, total: amount })
+  return questions.slice(0, amount)
+}
