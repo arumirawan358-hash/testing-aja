@@ -1,5 +1,6 @@
 // Rank kepintaran: kelas rank dibuat khusus untuk KuisKita dengan
 // efek "bling" bertingkat yang terlihat di profil setiap pemain.
+import { DEFAULT_FRAME, isFrameId } from '../data/frames.js'
 
 export const RANKS = [
   { tier: 0, name: 'Tunas Bintang', minPoints: 0, bling: 0 },
@@ -65,6 +66,7 @@ export function toViewProfile(profile) {
   return {
     name: typeof safe.name === 'string' ? safe.name.slice(0, 24) : '',
     avatar: typeof safe.avatar === 'string' ? safe.avatar.slice(0, 24) : '',
+    frame: isFrameId(safe.frame) ? safe.frame : DEFAULT_FRAME,
     smartPoints,
     wins,
     draws,
@@ -85,6 +87,7 @@ export function sanitizeWireProfile(value) {
   const view = toViewProfile({
     name,
     avatar: typeof value.avatar === 'string' ? value.avatar : '',
+    frame: typeof value.frame === 'string' ? value.frame : '',
     smartPoints: value.smartPoints,
     wins: value.wins,
     draws: value.draws,

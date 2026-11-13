@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ArrowDown, ArrowRight, ArrowUpRight, BadgeCheck, BookOpen, Check, ChevronRight, CircleHelp, Copy, GraduationCap, Hash, Heart, KeyRound, Layers3, LockKeyhole, Play, Plus, ShieldCheck, Sparkles, Target, Trophy, UserRound, UsersRound, WandSparkles, Zap } from 'lucide-react'
 import Brand from './Brand.jsx'
-import { CUSTOM_SUBJECT, DEFAULT_CONFIG, LEVELS, getLevel, validateConfig, validateName } from '../data/subjects.js'
+import { CUSTOM_SUBJECT, DEFAULT_CONFIG, LEVELS, getLevel, gradeFieldLabel, validateConfig, validateName } from '../data/subjects.js'
 import SoundToggle from './SoundToggle.jsx'
 import MenuButtons from './MenuButtons.jsx'
 import { RankBadge } from './ProfileCard.jsx'
@@ -70,15 +70,16 @@ function SetupForm({ session }) {
               {LEVELS.map((level) => <option value={level.id} key={level.id}>{level.label}</option>)}
             </select>
           </label>
-          <label className="field"><span>Kelas <i>*</i></span>
+          <label className="field"><span>{gradeFieldLabel(config)} <i>*</i></span>
             <select value={config.grade} onChange={(event) => setConfig({ ...config, grade: Number(event.target.value) })}>
-              {currentLevel.grades.map((grade) => <option key={grade} value={grade}>Kelas {grade}</option>)}
+              {currentLevel.grades.map((grade, gradeIndex) => <option key={grade} value={grade}>{currentLevel.gradeLabels ? currentLevel.gradeLabels[gradeIndex] : `Kelas ${grade}`}</option>)}
             </select>
           </label>
         </div>
         <div className="form-row">
-          <label className="field"><span>Mata pelajaran <i>*</i></span>
+          <label className="field"><span>Mata pelajaran {config.source === 'bank' ? <i>*</i> : <em>(opsional)</em>}</span>
             <select value={config.subject} onChange={(event) => setConfig({ ...config, subject: event.target.value })}>
+              {config.source !== 'bank' && <option value="">Bebas (sesuai instruksi AI)</option>}
               {currentLevel.subjects.map((subject) => <option key={subject} value={subject}>{subject}</option>)}
               {config.source !== 'bank' && <option value={CUSTOM_SUBJECT}>Lainnya (khusus AI)</option>}
             </select>
@@ -92,7 +93,7 @@ function SetupForm({ session }) {
         <div className="source-section">
           <div className="field-title">Sumber soal <span>Pilih sesuai kebutuhanmu</span></div>
           <div className="source-options" role="radiogroup" aria-label="Sumber soal">
-            <button type="button" role="radio" aria-checked={config.source === 'bank'} className={`source-option ${config.source === 'bank' ? 'selected' : ''}`} onClick={() => setConfig({ ...config, source: 'bank', subject: config.subject === CUSTOM_SUBJECT ? currentLevel.subjects[0] : config.subject })}>
+            <button type="button" role="radio" aria-checked={config.source === 'bank'} className={`source-option ${config.source === 'bank' ? 'selected' : ''}`} onClick={() => setConfig({ ...config, source: 'bank', subject: (!config.subject || config.subject === CUSTOM_SUBJECT) ? currentLevel.subjects[0] : config.subject })}>
               <span className="source-icon bank-icon"><BookOpen size={18} /></span><span><strong>Bank soal</strong><small>Langsung main</small></span><span className="radio-dot" />
             </button>
             <button type="button" role="radio" aria-checked={config.source === 'groq'} className={`source-option ${config.source === 'groq' ? 'selected' : ''}`} onClick={() => setConfig({ ...config, source: 'groq' })}>
@@ -103,7 +104,8 @@ function SetupForm({ session }) {
             <p className="source-note"><CircleHelp size={14} /> Bank soal bisa berulang untuk jumlah besar. Pilih AI untuk variasi lebih banyak.</p>
           ) : (
             <div className="ai-key-area">
-              <label className="field"><span>Topik khusus <em>(opsional)</em></span><input value={config.topic} onChange={(event) => setConfig({ ...config, topic: event.target.value })} placeholder="Contoh: pecahan atau tata surya" maxLength={100} /></label>
+              <label className="field"><span>Instruksi untuk AI <em>(opsional, boleh bebas)</em></span><textarea className="instruction-input" rows={2} value={config.topic} onChange={(event) => setConfig({ ...config, topic: event.target.value })} placeholder="Contoh: buatkan soal SKD 2025 gaya CPNS (TIU/TKP), atau soal pecahan kelas 5 tentang penyederhanaan" maxLength={500} /></label>
+              <p className="source-note"><Sparkles size={14} /> Suruh AI membuat soal apa pun: ujian tertentu (SKD/CPNS, UTBK), tahun tertentu, gaya soal, atau topik khusus. Mata pelajaran bisa dikosongkan bila instruksimu sudah cukup jelas.</p>
               <label className="field"><span>API key Groq <i>*</i></span><div className="key-input"><input type={showKey ? 'text' : 'password'} value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Masukkan API key Groq" maxLength={512} autoComplete="off" spellCheck="false" /><button type="button" onClick={() => setShowKey(!showKey)} aria-label={showKey ? 'Sembunyikan API key Groq' : 'Tampilkan API key Groq'}>{showKey ? 'Sembunyikan' : 'Lihat'}</button></div></label>
               <p className="source-note"><LockKeyhole size={14} /> Main sendiri: masukkan kuncimu. Main berdua: cukup pembuat ruang yang mengisi; teman tidak perlu. Kunci hanya sementara di browser dan dikirim langsung ke Groq, bukan ke teman atau GitHub. Kuota atau biaya Groq dapat berlaku.</p>
               <a className="text-link" href="https://console.groq.com/keys" target="_blank" rel="noreferrer">Dapatkan API key di Groq Console <ArrowUpRight size={14} /></a>

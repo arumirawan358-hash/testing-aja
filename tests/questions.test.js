@@ -1,14 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import { CUSTOM_SUBJECT, DEFAULT_CONFIG, LEVELS, subjectName, validateConfig } from '../src/data/subjects.js'
+import { bankCoversSubject, CUSTOM_SUBJECT, DEFAULT_CONFIG, LEVELS, subjectName, validateConfig } from '../src/data/subjects.js'
 import { isValidQuestion, makePracticeQuestions, scoreAnswers } from '../src/lib/questions.js'
 
 describe('bank soal dan penilaian', () => {
   it('supports every listed grade and subject', () => {
     for (const level of LEVELS) for (const grade of level.grades) for (const subject of level.subjects) {
+      if (subject === CUSTOM_SUBJECT) continue
       const config = { level: level.id, grade, subject, count: 30, source: 'bank' }
-      const questions = makePracticeQuestions(config)
-      expect(questions, `${level.id} ${grade} ${subject}`).toHaveLength(30)
-      expect(questions.every(isValidQuestion), `${level.id} ${grade} ${subject}`).toBe(true)
+      const inSchoolBank = bankCoversSubject(subject)
+      if (inSchoolBank) {
+        expect(validateConfig(config), `${level.id} ${grade} ${subject}`).toBe('')
+        const questions = makePracticeQuestions(config)
+        expect(questions, `${level.id} ${grade} ${subject}`).toHaveLength(30)
+        expect(questions.every(isValidQuestion), `${level.id} ${grade} ${subject}`).toBe(true)
+      } else {
+        // Mata pelajaran di luar cakupan bank harus lewat AI.
+        expect(validateConfig(config), `${level.id} ${grade} ${subject}`).not.toBe('')
+        expect(validateConfig({ ...config, source: 'groq', topic: 'Topik uji' }), `${level.id} ${grade} ${subject}`).toBe('')
+      }
     }
   })
 
@@ -31,9 +40,13 @@ describe('bank soal dan penilaian', () => {
     const config = { ...DEFAULT_CONFIG, source: 'groq', subject: CUSTOM_SUBJECT, customSubject: 'Seni Budaya', topic: 'Musik tradisional' }
     expect(validateConfig(config)).toBe('')
     expect(subjectName(config)).toBe('Seni Budaya')
-    expect(validateConfig({ ...config, customSubject: '' })).not.toBe('')
+    // Mata pelajaran boleh dikosongkan untuk AI, tetapi instruksi topik wajib ada.
+    const freeTopic = { ...DEFAULT_CONFIG, source: 'groq', subject: '', customSubject: '', topic: 'Buatkan soal SKD 2025' }
+    expect(validateConfig(freeTopic)).toBe('')
+    expect(subjectName(freeTopic)).toBe('')
+    expect(validateConfig({ ...freeTopic, topic: '' })).not.toBe('')
     expect(validateConfig({ ...config, source: 'bank' })).not.toBe('')
-    expect(validateConfig({ ...config, topic: 'x'.repeat(101) })).not.toBe('')
+    expect(validateConfig({ ...config, topic: 'x'.repeat(501) })).not.toBe('')
   })
 
   it('separates correct, wrong and skipped answers and rounds the score', () => {

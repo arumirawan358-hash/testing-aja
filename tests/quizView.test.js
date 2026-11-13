@@ -35,14 +35,15 @@ function quizState(role = 'guest') {
     screen: 'quiz', role, connected: false, roomClosed: false, status: 'disconnected',
     error: 'Koneksi terputus. Kamu tetap bisa lanjut; jawaban tersimpan di tab ini.',
     selfName: 'Mentari', opponentName: 'Bintang', opponentProgress: 0, code: 'ABC123',
-    config: { ...DEFAULT_CONFIG, source: 'bank', count: 3 }, gameId: 'round-1', questions, answers: [], startedAt: Date.now(),
+    config: { ...DEFAULT_CONFIG, source: 'bank', count: 3 }, gameId: 'round-1', questions,
+    answers: [undefined, undefined, undefined], cursor: 0, submitted: false, startedAt: Date.now(),
   }
 }
 
 describe('quiz controls', () => {
   it.each(['guest', 'host'])('lets a disconnected %s select and advance without losing the connection warning', (role) => {
     let state = quizState(role)
-    const session = { submitAnswer: vi.fn(), reconnect: vi.fn(), quit: vi.fn() }
+    const session = { submitAnswer: vi.fn(), skipQuestion: vi.fn(), navigate: vi.fn(), advanceCursor: vi.fn(), submitRound: vi.fn(), reconnect: vi.fn(), quit: vi.fn() }
     show(Quiz, state, session)
     const next = () => container.querySelector('.next-button')
     const skip = () => container.querySelector('.skip-button')
@@ -57,7 +58,7 @@ describe('quiz controls', () => {
     click(next())
     expect(session.submitAnswer).toHaveBeenLastCalledWith(0, { gameId: 'round-1', index: 0 })
 
-    state = { ...state, answers: [0] }
+    state = { ...state, answers: [0, undefined, undefined], cursor: 1 }
     show(Quiz, state, session)
     expect(next().disabled).toBe(true)
     click(option(1))
@@ -65,7 +66,7 @@ describe('quiz controls', () => {
     click(next())
     expect(session.submitAnswer).toHaveBeenLastCalledWith(1, { gameId: 'round-1', index: 1 })
 
-    state = { ...state, answers: [0, 1] }
+    state = { ...state, answers: [0, 1, undefined], cursor: 2 }
     show(Quiz, state, session)
     click(option(2))
     expect(next().disabled).toBe(false)

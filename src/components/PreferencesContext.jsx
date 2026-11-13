@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { cleanName, validateName } from '../data/subjects.js'
 import { isAvatarId } from '../data/avatars.js'
+import { isFrameId } from '../data/frames.js'
 import { HINT_STORAGE_KEY, PROFILE_STORAGE_KEY, loadHintEnabled, loadProfile, recordCompletedGame, sanitizeProfile, saveHintEnabled, saveProfile } from '../lib/preferences.js'
 import PreferencesPanel from './PreferencesPanel.jsx'
 
@@ -10,6 +11,7 @@ export function PreferencesProvider({ children }) {
   const [profile, setProfile] = useState(loadProfile)
   const [hintEnabled, setHintEnabled] = useState(loadHintEnabled)
   const [panel, setPanel] = useState(null)
+  const [roomCode, setRoomCode] = useState('')
   useEffect(() => { saveProfile(profile) }, [profile])
   useEffect(() => { saveHintEnabled(hintEnabled) }, [hintEnabled])
   useEffect(() => {
@@ -34,14 +36,19 @@ export function PreferencesProvider({ children }) {
     setProfile((current) => ({ ...current, avatar }))
     return ''
   }, [])
+  const saveFrame = useCallback((frame) => {
+    if (!isFrameId(frame)) return 'Bingkai tidak dikenal.'
+    setProfile((current) => ({ ...current, frame }))
+    return ''
+  }, [])
   const recordResult = useCallback((gameId, score, outcome) => {
     setProfile((current) => recordCompletedGame(current, gameId, score, outcome))
   }, [])
   const openPanel = useCallback((name) => {
-    if (['profile', 'settings', 'about'].includes(name)) setPanel(name)
+    if (['profile', 'settings', 'about', 'friends'].includes(name)) setPanel(name)
   }, [])
   const closePanel = useCallback(() => setPanel(null), [])
-  const value = useMemo(() => ({ profile, hintEnabled, setHintEnabled, saveName, saveAvatar, recordResult, openPanel, closePanel }), [profile, hintEnabled, saveName, saveAvatar, recordResult, openPanel, closePanel])
+  const value = useMemo(() => ({ profile, hintEnabled, setHintEnabled, saveName, saveAvatar, saveFrame, recordResult, openPanel, closePanel, roomCode, setRoomCode }), [profile, hintEnabled, saveName, saveAvatar, saveFrame, recordResult, openPanel, closePanel, roomCode])
 
   return <PreferencesContext.Provider value={value}>
     {children}

@@ -26,6 +26,8 @@ const initialState = () => ({
   roomClosed: false,
   questions: [],
   answers: [],
+  cursor: 0,
+  submitted: false,
   opponentProgress: 0,
   preparation: null,
   startedAt: null,
@@ -53,7 +55,7 @@ function historyKey(config) {
 }
 
 function resetRound(status = 'joined') {
-  return { screen: 'lobby', status, error: '', roomClosed: false, questions: [], answers: [], opponentProgress: 0, preparation: null, startedAt: null, result: null, gameId: '', rematchRequested: false, opponentRematchRequested: false }
+  return { screen: 'lobby', status, error: '', roomClosed: false, questions: [], answers: [], cursor: 0, submitted: false, opponentProgress: 0, preparation: null, startedAt: null, result: null, gameId: '', rematchRequested: false, opponentRematchRequested: false }
 }
 
 const safeError = (error) => {
@@ -118,6 +120,19 @@ export class GameSession {
   patch(update) {
     this.state = { ...this.state, ...update }
     this.listeners.forEach((listener) => listener(this.state))
+  }
+
+  // Jawaban penuh: tiap slot bernilai angka (dijawab) atau null (dilewati).
+  answeredCount() {
+    return this.state.answers.filter((answer) => answer !== undefined).length
+  }
+
+  allVisited() {
+    return this.state.questions.length > 0 && this.answeredCount() === this.state.questions.length
+  }
+
+  normalizedAnswers() {
+    return this.state.questions.map((_, index) => (this.state.answers[index] === undefined ? null : this.state.answers[index]))
   }
 
   clearTimers() {
@@ -429,7 +444,7 @@ export class GameSession {
       config: this.state.config,
       phase: this.state.screen,
       status: this.state.status,
-      opponentProgress: this.state.answers.length,
+      opponentProgress: this.answeredCount(),
       gameId: this.state.gameId,
       rematchRequested: this.state.rematchRequested,
     })
@@ -524,8 +539,8 @@ export class GameSession {
         status: message.status === 'preparing' ? 'preparing' : this.state.screen === 'results' && !returnToLobby ? 'finished' : 'joined', error: '',
       })
       if (message.gameId && message.gameId === this.state.gameId && ['quiz', 'waiting'].includes(this.state.screen)) {
-        this.send({ type: 'progress', gameId: this.state.gameId, count: this.state.answers.length })
-        if (this.state.screen === 'waiting' && this.state.answers.length === this.state.config.count) this.sendFinished()
+        this.send({ type: 'progress', gameId: this.state.gameId, count: this.answeredCount() })
+        if (this.state.screen === 'waiting' && this.state.submitted) this.sendFinished()
       }
       if (this.state.screen === 'results' && this.state.rematchRequested) this.send({ type: 'rematch-request', gameId: this.state.gameId })
       return
@@ -617,7 +632,7 @@ export class GameSession {
         return
       }
       const sameGame = this.state.gameId === incoming.gameId
-      this.patch({ questions, gameId: incoming.gameId, answers: sameGame ? this.state.answers : [], status: 'ready', preparation: null, error: '' })
+      this.patch({ questions, gameId: incoming.gameId, answers: sameGame ? this.state.answers : new Array(incoming.total).fill(undefined), cursor: sameGame ? this.state.cursor : 0, submitted: sameGame ? this.state.submitted : false, status: 'ready', preparation: null, error: '' })
       this.incoming = null
       this.send({ type: 'ready', gameId: incoming.gameId, transferId: incoming.transferId })
       return
@@ -648,11 +663,11 @@ export class GameSession {
       if (this.state.screen === 'lobby') {
         this.patch({ screen: 'quiz', status: 'playing', startedAt: this.clock(), preparation: null, error: '' })
       }
-      this.send({ type: 'go', gameId: this.state.gameId, opponentProgress: this.state.answers.length })
+      this.send({ type: 'go', gameId: this.state.gameId, opponentProgress: this.answeredCount() })
       return
     }
     if (message.type === 'go' && role === 'guest' && this.state.screen !== 'results' && message.gameId === this.state.gameId && this.state.questions.length) {
-      const finished = this.state.answers.length === this.state.questions.length
+      const finished = this.state.submitted
       this.incoming = null
       this.patch({ screen: finished ? 'waiting' : 'quiz', status: 'playing', preparation: null, startedAt: this.state.startedAt || this.clock(), opponentProgress: Number(message.opponentProgress) || 0, error: '' })
       if (finished) this.sendFinished()
@@ -709,6 +724,8 @@ export class GameSession {
     this.outgoing = null
     this.partialQuestions = []
     this.patch(resetRound())
+    // Host menekan "Main lagi": langsung buat soal baru (berbeda dari ronde sebelumnya).
+    this.startGame()
   }
 
   async startGame() {
@@ -720,7 +737,7 @@ export class GameSession {
     }
     this.guestFinished = null
     const done = this.partialQuestions.length
-    this.patch({ status: 'preparing', error: '', preparation: { done, total: this.state.config.count }, questions: [], answers: [], opponentProgress: 0, result: null, gameId: '' })
+    this.patch({ status: 'preparing', error: '', preparation: { done, total: this.state.config.count }, questions: [], answers: [], cursor: 0, submitted: false, opponentProgress: 0, result: null, gameId: '' })
     this.send({ type: 'preparing', done })
     await this.prepareQuestions()
   }
@@ -756,7 +773,7 @@ export class GameSession {
       const gameId = makeToken()
       this.partialQuestions = []
       this.outgoing = null
-      this.patch({ questions, answers: [], gameId, opponentProgress: 0, preparation: null })
+      this.patch({ questions, answers: new Array(questions.length).fill(undefined), cursor: 0, submitted: false, gameId, opponentProgress: 0, preparation: null })
       if (role === 'solo') {
         this.patch({ screen: 'quiz', status: 'playing', startedAt: this.clock() })
       } else if (this.state.connected) {
@@ -841,41 +858,94 @@ export class GameSession {
     if (!send({ type: 'game-loaded', gameId, transferId: transfer.transferId }) && active()) this.retryTransfer(transfer)
   }
 
+  // Pemain bebas memilih urutan soal; jawaban tersimpan per nomor soal dan
+  // masih bisa diubah sampai kuis dikumpulkan.
   submitAnswer(answer, question = null) {
-    const { screen, role, connected, questions, answers, gameId } = this.state
-    if (screen !== 'quiz' || answers.length >= questions.length) return false
-    // Ignore a second tap for a question that was already submitted.
-    if (question && (question.gameId !== gameId || question.index !== answers.length)) return false
+    const { screen, role, connected, questions, answers, gameId, cursor } = this.state
+    if (screen !== 'quiz' || this.state.submitted) return false
+    const index = question && Number.isInteger(question.index) ? question.index : cursor
+    if (question && question.gameId !== gameId) return false
+    if (!Number.isInteger(index) || index < 0 || index >= questions.length) return false
     if (answer !== null && (!Number.isInteger(answer) || answer < 0 || answer > 3)) return false
-    const next = [...answers, answer]
+    // Samakan panjang array jawaban dengan jumlah soal (pertahanan dari data lama).
+    const next = new Array(questions.length).fill(undefined)
+    answers.forEach((slot, slotIndex) => { next[slotIndex] = slot })
+    next[index] = answer
     // Both players already have the full verified quiz. Keep answering locally
     // during a temporary outage and synchronize progress when they reconnect.
     this.patch({ answers: next, ...(connected ? { error: '' } : {}) })
-    if (role !== 'solo') this.send({ type: 'progress', gameId, count: next.length })
-    if (next.length !== questions.length) return true
+    if (role !== 'solo') this.send({ type: 'progress', gameId, count: this.answeredCount() })
+    // Kumpulkan otomatis hanya bila semua soal dijawab (tanpa yang masih dilewati).
+    if (next.every((slot) => slot !== undefined && slot !== null)) {
+      this.finishRound()
+      return true
+    }
+    this.advanceCursor(index)
+    return true
+  }
+
+  // Lewati soal: tandai belum dijawab, boleh kembali kapan saja sebelum kumpul.
+  skipQuestion() {
+    const { screen, questions, answers, cursor, submitted } = this.state
+    if (screen !== 'quiz' || submitted) return false
+    if (answers[cursor] !== undefined) { this.advanceCursor(cursor); return true }
+    if (!questions.length || cursor >= questions.length) return false
+    return this.submitAnswer(null)
+  }
+
+  navigate(index) {
+    const { screen, questions, submitted } = this.state
+    if (screen !== 'quiz' || submitted) return false
+    if (!Number.isInteger(index) || index < 0 || index >= questions.length) return false
+    this.patch({ cursor: index })
+    return true
+  }
+
+  advanceCursor(from) {
+    const { questions, answers } = this.state
+    const total = questions.length
+    if (!total) return
+    for (let step = 1; step <= total; step += 1) {
+      const index = (from + step) % total
+      if (answers[index] === undefined) { this.patch({ cursor: index }); return }
+    }
+    this.patch({ cursor: Math.min(from, total - 1) })
+  }
+
+  // Tombol "Selesaikan kuis": aktif setelah semua soal dikunjungi/dilewati.
+  submitRound() {
+    const { screen, submitted } = this.state
+    if (screen !== 'quiz' || submitted || !this.allVisited()) return false
+    this.finishRound()
+    return true
+  }
+
+  finishRound() {
+    const { role, connected, questions } = this.state
+    const next = this.normalizedAnswers()
+    this.patch({ answers: next, submitted: true, ...(connected ? { error: '' } : {}) })
     this.elapsedMs = Math.max(0, this.clock() - this.state.startedAt)
     if (role === 'solo') {
       this.patch({ screen: 'results', status: 'finished', result: { host: { name: this.state.selfName, ...scoreAnswers(questions, next), elapsedMs: this.elapsedMs }, guest: null } })
-    } else {
-      this.patch({ screen: 'waiting' })
-      if (role === 'guest') this.sendFinished()
-      else this.maybeFinish()
+      return
     }
-    return true
+    this.patch({ screen: 'waiting' })
+    if (role === 'guest') this.sendFinished()
+    else this.maybeFinish()
   }
 
   sendFinished() {
     clearTimeout(this.finishedRetryTimer)
     this.finishedRetryTimer = null
     if (this.state.role !== 'guest' || this.state.screen !== 'waiting' || this.state.roomClosed || !this.state.connected) return
-    this.send({ type: 'finished', gameId: this.state.gameId, answers: this.state.answers, elapsedMs: this.elapsedMs })
+    this.send({ type: 'finished', gameId: this.state.gameId, answers: this.normalizedAnswers(), elapsedMs: this.elapsedMs })
     // Retry idempotently until results arrive; this also recovers a lost result.
     this.finishedRetryTimer = setTimeout(() => this.sendFinished(), this.finishedRetryMs)
   }
 
   maybeFinish() {
     const { questions, answers, selfName, opponentName, gameId } = this.state
-    if (this.state.role !== 'host' || !this.guestFinished || answers.length !== questions.length || !questions.length) return
+    if (this.state.role !== 'host' || !this.guestFinished || !this.state.submitted || !questions.length) return
     const result = {
       host: { name: selfName, ...scoreAnswers(questions, answers), elapsedMs: this.elapsedMs },
       guest: { name: opponentName, ...scoreAnswers(questions, this.guestFinished.answers), elapsedMs: this.guestFinished.elapsedMs },

@@ -1,5 +1,5 @@
 import { QUESTION_BANK } from '../data/questionBank.js'
-import { validateConfig } from '../data/subjects.js'
+import { effectiveGrade, validateConfig } from '../data/subjects.js'
 
 export function shuffle(items, random = Math.random) {
   const copy = [...items]
@@ -149,7 +149,8 @@ export function makePracticeQuestions(config, random = Math.random) {
   const error = validateConfig(config)
   if (error) throw new Error(error)
   const count = Number(config.count)
-  const grade = Number(config.grade)
+  // Jenjang baru (Perguruan Tinggi/Umum) dipetakan ke tingkat kesulitan setara.
+  const grade = effectiveGrade(config)
   const questions = []
 
   if (config.subject === 'Matematika') {

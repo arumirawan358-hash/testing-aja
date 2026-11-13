@@ -64,7 +64,8 @@ const sessions = []
 function session(network, extra = {}) { const s = new GameSession({ peerFactory: network.factory, ...extra }); sessions.push(s); return s }
 afterEach(() => { while (sessions.length) sessions.pop().destroy() })
 const questionsFor = (round, count) => Array.from({ length: count }, (_, i) => ({ id: `q-${i}`, prompt: `Soal ronde ${round} nomor ${i}`, options: ['A', 'B', 'C', 'D'], answer: 0, explanation: 'A benar.' }))
-const finish = (game) => { while (game.state.screen === 'quiz') game.submitAnswer(game.state.questions[game.state.answers.length].answer) }
+const answered = (game) => game.state.answers.filter((answer) => answer !== undefined)
+const finish = (game) => { while (game.state.screen === 'quiz') game.submitAnswer(game.state.questions[game.state.cursor].answer) }
 
 async function joinedGame(count = 3, options = {}) {
   const network = options.network || new FakeNetwork()
@@ -341,8 +342,8 @@ describe('ruang dua pemain', () => {
     guest.submitAnswer(guest.state.questions[0].answer)
     guest.submitAnswer(guest.state.questions[1].answer)
     host.submitAnswer(host.state.questions[0].answer)
-    expect(guest.state.answers).toHaveLength(2)
-    expect(host.state.answers).toHaveLength(1)
+    expect(answered(guest)).toHaveLength(2)
+    expect(answered(host)).toHaveLength(1)
     expect(guest.state.error).toMatch(/tersimpan|lanjut/i)
     expect(guest.state.error).toMatch(/jangan tutup|muat ulang/i)
     expect(host.state.error).toMatch(/jangan tutup|muat ulang/i)
@@ -366,8 +367,8 @@ describe('ruang dua pemain', () => {
     }
     expect(host.state.screen).toBe('waiting')
     expect(guest.state.screen).toBe('waiting')
-    expect(host.state.answers).toHaveLength(3)
-    expect(guest.state.answers).toHaveLength(3)
+    expect(answered(host)).toHaveLength(3)
+    expect(answered(guest)).toHaveLength(3)
     guest.reconnect()
     await until(() => host.state.screen === 'results' && guest.state.screen === 'results')
     expect(guest.state.result).toEqual(host.state.result)
@@ -427,9 +428,9 @@ describe('ruang dua pemain', () => {
     const question = { gameId: guest.state.gameId, index: 0 }
     guest.submitAnswer(0, question)
     guest.submitAnswer(0, question)
-    expect(guest.state.answers).toHaveLength(1)
+    expect(answered(guest)).toHaveLength(1)
     guest.submitAnswer(1, { gameId: guest.state.gameId, index: 1 })
-    expect(guest.state.answers).toEqual([0, 1])
+    expect(answered(guest)).toEqual([0, 1])
   })
 
   it('automatically retries a temporary outage and resynchronizes locally saved answers', async () => {
@@ -443,7 +444,7 @@ describe('ruang dua pemain', () => {
     guest.submitAnswer(guest.state.questions[0].answer)
     host.submitAnswer(host.state.questions[0].answer)
     await until(() => guest.reconnectAttempts >= 2)
-    expect(guest.state.answers).toHaveLength(1)
+    expect(answered(guest)).toHaveLength(1)
     network.peers.set(hostPeer.id, hostPeer)
     await until(() => host.state.connected && guest.state.connected && host.state.opponentProgress === 1 && guest.state.opponentProgress === 1)
     finish(host); finish(guest)
@@ -486,7 +487,7 @@ describe('ruang dua pemain', () => {
     guest.reconnect()
     await until(() => guest.peer !== stuckPeer && host.state.connected && guest.state.connected)
     expect(stuckPeer.destroyed).toBe(true)
-    expect(guest.state.answers).toHaveLength(1)
+    expect(answered(guest)).toHaveLength(1)
   })
 
   it('restores signaling without replacing an active game connection', async () => {
@@ -520,7 +521,7 @@ describe('ruang dua pemain', () => {
     expect(host.state.status).toBe('playing')
     expect(host.state.error).toContain('tetap bisa menjawab')
     host.submitAnswer(0)
-    expect(host.state.answers).toHaveLength(1)
+    expect(answered(host)).toHaveLength(1)
     guest.reconnect()
     await until(() => host.state.connected && guest.state.connected)
     finish(host); finish(guest)
@@ -537,7 +538,7 @@ describe('ruang dua pemain', () => {
     guest.peer.disconnected = true
     expect(() => guest.connectToHost()).not.toThrow()
     expect(guest.state.status).toBe('disconnected')
-    expect(guest.state.answers).toHaveLength(0)
+    expect(answered(guest)).toHaveLength(0)
   })
 
   it('recreates a destroyed guest peer without losing the player token or answers', async () => {
@@ -554,7 +555,7 @@ describe('ruang dua pemain', () => {
     await until(() => host.state.connected && guest.state.connected)
     expect(guest.peer).not.toBe(oldPeer)
     expect(guest.selfToken).toBe(token)
-    expect(guest.state.answers).toHaveLength(1)
+    expect(answered(guest)).toHaveLength(1)
     finish(host); finish(guest)
     await until(() => guest.state.screen === 'results')
     expect(guest.state.result.guest.score).toBe(100)
@@ -594,7 +595,7 @@ describe('ruang dua pemain', () => {
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(guest.state.roomClosed).toBe(true)
     expect(guest.state.error).toContain('meninggalkan')
-    expect(guest.state.answers).toEqual([0])
+    expect(answered(guest)).toEqual([0])
     expect(network.messages.filter((message) => message.type === 'join')).toHaveLength(joins)
   })
 
@@ -620,7 +621,7 @@ describe('ruang dua pemain', () => {
     await until(() => !host.state.connected && !guest.state.connected)
     guest.reconnect()
     await until(() => host.state.connected && guest.state.connected && guest.state.status === 'playing')
-    expect(guest.state.answers).toHaveLength(1)
+    expect(answered(guest)).toHaveLength(1)
     finish(host); finish(guest)
     await until(() => guest.state.screen === 'results')
     expect(guest.state.result.guest.score).toBe(100)
@@ -671,10 +672,10 @@ describe('ruang dua pemain', () => {
     expect(host.state.screen).toBe('results')
     expect(guest.state.screen).toBe('results') // The guest can finish reading the review first.
     await guest.playAgain()
-    await until(() => host.state.screen === 'lobby' && guest.state.screen === 'lobby')
+    await until(() => guest.state.screen !== 'results')
     expect(host.state.connected && guest.state.connected).toBe(true)
     expect(host.aiKey).toBe(key)
-    await host.startGame()
+    // Host langsung membuat soal baru otomatis tanpa menekan tombol lagi.
     await until(() => guest.state.screen === 'quiz')
     expect(groqFactory.mock.calls[1][2].avoidPrompts).toEqual(oldPrompts)
     expect(host.state.questions.map((item) => item.prompt)).not.toEqual(oldPrompts)
@@ -691,12 +692,12 @@ describe('ruang dua pemain', () => {
     await until(() => host.state.opponentRematchRequested)
     expect(guest.state.rematchRequested).toBe(true)
     await host.playAgain()
-    await until(() => host.state.screen === 'lobby' && guest.state.screen === 'lobby')
+    await until(() => guest.state.screen !== 'results')
     expect(host.state.rematchRequested).toBe(false)
     expect(guest.state.rematchRequested).toBe(false)
   })
 
-  it('rejoins the lobby if the rematch signal was lost during a disconnect', async () => {
+  it('rejoins and restarts a fresh round if the rematch signal was lost during a disconnect', async () => {
     const { host, guest } = await joinedGame(1)
     await host.startGame()
     await until(() => guest.state.screen === 'quiz')
@@ -716,9 +717,13 @@ describe('ruang dua pemain', () => {
     expect(host.state.screen).toBe('results')
     expect(guest.state.screen).toBe('results')
     guest.reconnect()
-    await until(() => host.state.connected && guest.state.connected && guest.state.screen === 'lobby')
-    expect(guest.state.questions).toHaveLength(0)
+    // Sinyal rematch yang hilang dikirim ulang; setelah tersambung, ronde baru
+    // dengan soal baru dimulai otomatis oleh host (fitur "Main lagi").
+    await until(() => host.state.connected && guest.state.connected && guest.state.screen === 'quiz')
+    expect(guest.state.questions).toHaveLength(1)
     expect(guest.state.rematchRequested).toBe(false)
+    expect(host.state.rematchRequested).toBe(false)
+    expect(guest.state.gameId).not.toBe('')
   })
 
   it('preserves rematch readiness when a guest reconnects on the results screen', async () => {
@@ -734,7 +739,7 @@ describe('ruang dua pemain', () => {
     guest.reconnect()
     await until(() => host.state.connected && guest.state.connected && guest.state.opponentRematchRequested)
     await guest.playAgain()
-    await until(() => host.state.screen === 'lobby' && guest.state.screen === 'lobby')
+    await until(() => guest.state.screen !== 'results')
   })
 })
 

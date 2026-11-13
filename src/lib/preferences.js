@@ -1,5 +1,6 @@
 import { cleanName, validateName } from '../data/subjects.js'
 import { DEFAULT_AVATAR, isAvatarId } from '../data/avatars.js'
+import { DEFAULT_FRAME, isFrameId } from '../data/frames.js'
 import { accuracyOf, pointsForGame, winRateOf } from './ranks.js'
 
 export const PROFILE_STORAGE_KEY = 'kuiskita:profile'
@@ -13,6 +14,7 @@ export function emptyProfile() {
   return {
     name: '',
     avatar: DEFAULT_AVATAR,
+    frame: DEFAULT_FRAME,
     gamesPlayed: 0,
     bestScore: null,
     recentGameIds: [],
@@ -40,6 +42,7 @@ export function sanitizeProfile(value) {
   return {
     name,
     avatar: isAvatarId(value.avatar) ? value.avatar : DEFAULT_AVATAR,
+    frame: isFrameId(value.frame) ? value.frame : DEFAULT_FRAME,
     gamesPlayed,
     bestScore,
     recentGameIds: [...new Set(ids)].slice(-MAX_RECENT_GAMES),

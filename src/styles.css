@@ -703,3 +703,118 @@ a { color: inherit; text-decoration: none; }
   .champion-art { width: 92px; height: 92px; }
   .profile-avatar-large { width: 68px; height: 68px; border-radius: 20px; }
 }
+
+/* ===== Bingkai avatar (10 efek animasi) ===== */
+.avatar-frame { position: relative; display: inline-grid; place-items: center; flex: none; padding: 3px; border-radius: 50%; }
+.avatar-frame .profile-avatar { width: 100%; height: 100%; }
+.avatar-frame .frame-fx { position: absolute; inset: -2px; border-radius: 50%; pointer-events: none; }
+.avatar-frame.profile-avatar-large { padding: 4px; }
+.avatar-frame.player-avatar { width: 48px; height: 48px; border-radius: 15px; }
+.avatar-frame.player-avatar .profile-avatar, .avatar-frame.player-avatar .frame-fx { border-radius: 12px; }
+.avatar-frame.friend-chip-avatar { width: 30px; height: 30px; }
+.avatar-frame.friend-row-avatar { width: 46px; height: 46px; }
+
+/* 1 bintang */
+.frame-bintang { background: linear-gradient(140deg, #cdb9ff, #9a7bf0); animation: frame-pulse 2.6s ease-in-out infinite; }
+.frame-bintang .frame-fx { border: 2px dashed #fff7d6; animation: frame-spin 9s linear infinite; }
+/* 2 emas */
+.frame-emas { background: conic-gradient(#ffdf80, #fff3c4, #e8a23e, #ffd977, #fff6d0, #d98f28, #ffdf80); animation: frame-spin 5s linear infinite; }
+.frame-emas .frame-fx { box-shadow: 0 0 12px #ffcf5c; animation: frame-glow 1.8s ease-in-out infinite; }
+/* 3 api */
+.frame-api { background: conic-gradient(#ff7a2f, #ffb347, #ff4d2f, #ffd23e, #ff7a2f); animation: frame-spin 3.2s linear infinite; }
+.frame-api .frame-fx { box-shadow: 0 0 14px #ff6b2fcc; animation: frame-flicker .9s ease-in-out infinite; }
+/* 4 es */
+.frame-es { background: linear-gradient(150deg, #bfe9ff, #6fc3ff, #d8f4ff, #8ed4ff); animation: frame-shimmer 3.4s ease-in-out infinite; }
+.frame-es .frame-fx { border: 2px solid #ffffffcc; box-shadow: 0 0 10px #9fd8ff; animation: frame-glow 2.2s ease-in-out infinite; }
+/* 5 pelangi */
+.frame-pelangi { background: conic-gradient(#ff6b8b, #ffb347, #ffe66d, #6be8a2, #5fa8ff, #b06aff, #ff6b8b); background-size: 100% 100%; animation: frame-spin 4s linear infinite, frame-glow 2s ease-in-out infinite; }
+.frame-pelangi .frame-fx { border: 2px solid #ffffffaa; }
+/* 6 galaksi */
+.frame-galaksi { background: conic-gradient(#2b1b57, #6a3fc0, #b06aff, #3d2a86, #7a54e8, #2b1b57); animation: frame-spin 7s linear infinite; }
+.frame-galaksi .frame-fx { box-shadow: 0 0 16px #8a63f0aa; background: radial-gradient(circle at 30% 20%, #ffffff22, transparent 60%); animation: frame-glow 2.6s ease-in-out infinite; }
+/* 7 neon */
+.frame-neon { background: #101024; animation: frame-pulse 1.6s ease-in-out infinite; }
+.frame-neon .frame-fx { border: 2px solid #39f7ff; box-shadow: 0 0 10px #39f7ff, inset 0 0 8px #ff4df888; animation: frame-glow 1.2s ease-in-out infinite; }
+/* 8 sakura */
+.frame-sakura { background: linear-gradient(140deg, #ffd3e4, #ff9fc4, #ffe1ec, #f7a8cd); animation: frame-shimmer 4.2s ease-in-out infinite; }
+.frame-sakura .frame-fx { border: 2px dotted #fff; animation: frame-spin 12s linear infinite reverse; }
+/* 9 petir */
+.frame-petir { background: conic-gradient(#22224a, #ffe66d, #22224a, #ffe66d, #22224a); animation: frame-spin 2.4s linear infinite; }
+.frame-petir .frame-fx { box-shadow: 0 0 14px #ffe66daa; animation: frame-flicker .7s steps(2) infinite; }
+/* 10 konfeti */
+.frame-konfeti { background: conic-gradient(#ff6b8b, #ffe66d, #6be8a2, #5fa8ff, #b06aff, #ff9f43, #ff6b8b); animation: frame-spin 3.6s linear infinite reverse; }
+.frame-konfeti .frame-fx { border: 2px dashed #ffffffcc; animation: frame-spin 6s linear infinite; }
+
+@keyframes frame-spin { to { transform: rotate(360deg); } }
+@keyframes frame-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.045); } }
+@keyframes frame-glow { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+@keyframes frame-flicker { 0%, 100% { opacity: 1; } 40% { opacity: .45; } 70% { opacity: .85; } }
+@keyframes frame-shimmer { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.22) saturate(1.2); } }
+
+/* Pemilih bingkai */
+.frame-options { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.frame-option { display: grid; justify-items: center; gap: 5px; padding: 9px 4px 7px; border: 2px solid #eee9f8; border-radius: 13px; background: #fff; transition: transform .2s, border-color .2s, box-shadow .2s; }
+.frame-option:hover { transform: translateY(-2px); }
+.frame-option.selected { border-color: var(--purple); box-shadow: 0 6px 16px #7959e833; }
+.frame-option small { color: #8b8299; font-size: 8px; font-weight: 700; }
+.frame-option .frame-swatch { width: 34px; height: 34px; border-radius: 50%; }
+.frame-option.frame-bintang .frame-swatch { background: linear-gradient(140deg, #cdb9ff, #9a7bf0); }
+.frame-option.frame-emas .frame-swatch { background: conic-gradient(#ffdf80, #fff3c4, #e8a23e, #ffd977, #d98f28, #ffdf80); animation: frame-spin 5s linear infinite; }
+.frame-option.frame-api .frame-swatch { background: conic-gradient(#ff7a2f, #ffb347, #ff4d2f, #ffd23e, #ff7a2f); animation: frame-spin 3.2s linear infinite; }
+.frame-option.frame-es .frame-swatch { background: linear-gradient(150deg, #bfe9ff, #6fc3ff, #d8f4ff, #8ed4ff); }
+.frame-option.frame-pelangi .frame-swatch { background: conic-gradient(#ff6b8b, #ffb347, #ffe66d, #6be8a2, #5fa8ff, #b06aff, #ff6b8b); animation: frame-spin 4s linear infinite; }
+.frame-option.frame-galaksi .frame-swatch { background: conic-gradient(#2b1b57, #6a3fc0, #b06aff, #3d2a86, #7a54e8, #2b1b57); animation: frame-spin 7s linear infinite; }
+.frame-option.frame-neon .frame-swatch { background: #101024; border: 2px solid #39f7ff; box-shadow: 0 0 8px #39f7ff; }
+.frame-option.frame-sakura .frame-swatch { background: linear-gradient(140deg, #ffd3e4, #ff9fc4, #ffe1ec, #f7a8cd); }
+.frame-option.frame-petir .frame-swatch { background: conic-gradient(#22224a, #ffe66d, #22224a, #ffe66d, #22224a); animation: frame-spin 2.4s linear infinite; }
+.frame-option.frame-konfeti .frame-swatch { background: conic-gradient(#ff6b8b, #ffe66d, #6be8a2, #5fa8ff, #b06aff, #ff9f43, #ff6b8b); animation: frame-spin 3.6s linear infinite reverse; }
+
+/* ===== Navigasi soal ===== */
+.question-nav { padding: 16px 18px; margin-bottom: 14px; }
+.question-nav-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.question-nav-head small { color: #9b91ad; font-size: 9px; }
+.question-nav-grid { display: flex; flex-wrap: wrap; gap: 6px; max-height: 148px; overflow-y: auto; padding: 2px; }
+.nav-dot { min-width: 30px; height: 30px; padding: 0 6px; border: 1px solid #e6e1f0; border-radius: 9px; background: #fff; color: #8b8299; font-size: 10px; font-weight: 800; transition: transform .15s, background .2s, border-color .2s; }
+.nav-dot:hover { transform: translateY(-1px); border-color: #c9b8f5; }
+.nav-dot.answered { color: #5b3fd0; background: #eee8ff; border-color: #d5c6fb; }
+.nav-dot.skipped { color: #c2703a; background: #ffefe2; border-color: #f5cfae; }
+.nav-dot.unanswered { color: #8b8299; background: #fff; }
+.nav-dot.current { color: #fff; background: var(--purple); border-color: var(--purple); box-shadow: 0 5px 12px #7959e840; }
+.question-actions .nav-arrow { min-width: 42px; min-height: 42px; border: 1px solid #e2d9fb; border-radius: 10px; background: #fff; color: #6b4fd8; font-size: 13px; font-weight: 800; transition: background .2s, transform .2s; }
+.question-actions .nav-arrow:hover:not(:disabled) { background: #f2edff; transform: translateY(-1px); }
+.question-actions .nav-arrow:disabled { opacity: .35; }
+.finish-button { width: 100%; margin-top: 10px; }
+.instruction-input { width: 100%; min-height: 62px; resize: vertical; padding: 11px 13px; border: 1px solid var(--line); border-radius: 10px; font: inherit; font-size: 12px; color: var(--ink); background: #fff; }
+.instruction-input:focus { outline: 2px solid #c9b8f5; border-color: #c9b8f5; }
+
+/* ===== Teman & undangan ===== */
+.player-card-actions { display: flex; align-items: center; gap: 7px; flex: none; }
+.friend-add-button { padding: 7px 11px; border: 1px solid #ffd9a8; border-radius: 9px; background: #fff4e4; color: #c2703a; font-size: 10px; font-weight: 800; white-space: nowrap; transition: background .2s, transform .2s; }
+.friend-add-button:hover:not(:disabled) { background: #ffe9c9; transform: translateY(-1px); }
+.friend-add-button:disabled { color: #8aa892; background: #eaf6ee; border-color: #c8e6d1; cursor: default; }
+.friend-invite-box { margin-top: 15px; padding: 13px; border: 1px dashed #d9ccff; border-radius: 12px; background: #faf8ff; }
+.friend-invite-box .small-label { display: block; margin-bottom: 9px; }
+.friend-invite-list { display: grid; gap: 7px; }
+.friend-invite-chip { display: flex; align-items: center; gap: 9px; }
+.friend-invite-chip strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #4b4057; font-size: 11px; white-space: nowrap; }
+.friend-invite-button { padding: 6px 12px; border: 1px solid #d5c6fb; border-radius: 9px; background: #f0ebff; color: #6b4fd8; font-size: 10px; font-weight: 800; white-space: nowrap; }
+.friend-invite-button:hover:not(:disabled) { background: #e4daff; }
+.friend-invite-button:disabled { opacity: .45; cursor: not-allowed; }
+.friends-empty { display: grid; justify-items: center; gap: 7px; padding: 28px 18px; border: 1px dashed #e2d9f5; border-radius: 14px; background: #fbfaff; color: #9b91ad; text-align: center; }
+.friends-empty svg { color: #b7a3ee; }
+.friends-empty strong { color: #5d5172; font-size: 13px; }
+.friends-empty span { font-size: 10px; line-height: 1.7; max-width: 260px; }
+.friends-list { display: grid; gap: 9px; margin: 14px 0 6px; }
+.friend-row { display: flex; align-items: center; gap: 11px; padding: 11px 12px; border: 1px solid #f0edf5; border-radius: 13px; background: #fbfaff; }
+.friend-row-id { flex: 1; min-width: 0; display: grid; gap: 3px; justify-items: start; }
+.friend-row-id strong { color: #45375f; font-size: 12px; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.friend-row-id small { color: #a29aab; font-size: 9px; }
+.friend-row-actions { display: flex; gap: 6px; flex: none; }
+.friend-remove-button { padding: 6px 10px; border: 1px solid #f0d5d5; border-radius: 9px; background: #fff5f5; color: #c26a6a; font-size: 10px; font-weight: 800; }
+.friend-remove-button:hover { background: #ffe9e9; }
+
+@media (max-width: 560px) {
+  .frame-options { grid-template-columns: repeat(5, 1fr); }
+  .question-nav-grid { max-height: 120px; }
+  .friend-row { flex-wrap: wrap; }
+}
