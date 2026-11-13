@@ -282,6 +282,7 @@ export function BuzzerGame({ state, session }) {
   const myBuzzIndex = state.buzzOrder.findIndex((entry) => entry.token === myToken)
   const phaseOpen = state.phase === 'buzzing' || state.phase === 'answering'
   const canBuzz = phaseOpen && !buzzed && !myEntry
+  const reconnecting = state.role === 'guest' && !state.connected
   const isHost = state.role === 'host'
   const category = categoryLabel(state.settings?.category)
   const methodLabel = question?.kind === 'typing' ? 'Ketikan Manual' : 'Pilihan Ganda'
@@ -337,6 +338,9 @@ export function BuzzerGame({ state, session }) {
                   <input value={typed} disabled={!myTurn || Boolean(myEntry)} placeholder="Tulis jawaban di sini..." maxLength={120} aria-label="Kolom jawaban ketikan" onChange={(event) => setTyped(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submit() }} />
                 </label>
               )}
+              {!myTurn && phaseOpen && !myEntry && (
+                <p className="answer-lock-note"><LockKeyhole size={13} /> Tekan Buzzer merah dulu. Pilihan jawaban aktif saat giliranmu.</p>
+              )}
               {myTurn && !myEntry && (
                 <div className="answer-actions">
                   {hintEnabled && (
@@ -358,15 +362,16 @@ export function BuzzerGame({ state, session }) {
               {myTurn && !myEntry ? (
                 <div className="turn-banner hot"><Flame size={22} /><div><strong>Giliranmu menjawab!</strong><small>Pilih jawaban lalu tekan Kirim.</small></div></div>
               ) : canBuzz ? (
-                <button type="button" className="buzzer-button" onClick={(event) => {
+                <button type="button" className={`buzzer-button ${reconnecting ? 'reconnecting' : ''}`} onClick={(event) => {
+                  const button = event.currentTarget
                   play('buzzer')
-                  event.currentTarget.classList.add('pressed')
-                  setTimeout(() => event.currentTarget?.classList?.remove('pressed'), 380)
+                  button.classList.add('pressed')
+                  setTimeout(() => button.classList.remove('pressed'), 380)
                   session.buzz()
                 }} aria-label="Tombol buzzer merah">
                   <span className="buzzer-glow" aria-hidden="true" />
-                  <Zap size={30} fill="currentColor" /> BUZZER!
-                  <small>Tekan untuk mengambil giliran</small>
+                  <Zap size={30} fill="currentColor" /> {reconnecting ? 'MENGHUBUNGKAN…' : 'BUZZER!'}
+                  <small>{reconnecting ? 'Tekan tetap tersimpan dan akan dikirim otomatis' : 'Tekan untuk mengambil giliran'}</small>
                 </button>
               ) : buzzed && !myEntry ? (
                 <div className="turn-banner"><span className="pulse-dot" /><div><strong>Kamu buzz urutan ke-{myBuzzIndex + 1}</strong><small>{state.turn ? `Menunggu ${state.turn.name} selesai...` : 'Menunggu giliran...'}</small></div></div>

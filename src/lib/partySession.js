@@ -12,6 +12,8 @@ export const PARTY_PROTOCOL = 1
 export const MAX_PLAYERS = 5
 export const MAX_GUESTS = MAX_PLAYERS - 1
 export const BASE_POINTS = 10
+const ACTION_RETRY_MS = 900
+const MAX_ACTION_RETRIES = 5
 
 export function speedBonus(elapsedMs) {
   const ms = Number(elapsedMs) || 0
@@ -24,6 +26,15 @@ export function speedBonus(elapsedMs) {
 const safeError = (error) => {
   const message = error instanceof Error ? error.message : String(error || 'Terjadi kesalahan.')
   return message.slice(0, 180)
+}
+
+function questionHistoryKey(settings) {
+  return JSON.stringify([
+    settings?.category || '',
+    settings?.customCategory || '',
+    settings?.method || '',
+    String(settings?.topic || '').trim().toLocaleLowerCase('id-ID'),
+  ])
 }
 
 const initialState = () => ({
@@ -83,9 +94,14 @@ export class PartySession {
     this.selfProfile = null
     this.peer = null
     this.connection = null
-    this.pending = null
+    // Several players may open their join channel at the same time. A Set keeps
+    // one candidate from shadowing another before its join packet arrives.
+    this.pendingConnections = new Set()
     this.guestConnections = new Map() // token -> connection (host)
     this.round = null // { questions, index } — kunci jawaban hanya di host
+    // AI history stays only in the creator's tab and prevents repeat prompts
+    // when that room starts another round with the same settings.
+    this.questionHistory = new Map()
     this.attempted = new Set()
     this.buzzOrder = []
     this.history = []
@@ -96,6 +112,10 @@ export class PartySession {
     this.turnTimer = null
     this.reconnectTimer = null
     this.reconnectAttempts = 0
+    // Guest actions are idempotent at the host. Keeping the latest one lets a
+    // player tap while WebRTC reconnects instead of silently losing the tap.
+    this.pendingAction = null
+    this.actionRetryTimer = null
   }
 
   patch(next) {
@@ -127,8 +147,16 @@ export class PartySession {
 
   clearTimers() {
     this.clearGameTimers()
+    this.clearPendingAction()
     clearTimeout(this.connectTimer); this.connectTimer = null
     clearTimeout(this.reconnectTimer); this.reconnectTimer = null
+  }
+
+  clearPendingAction(type = '') {
+    if (type && this.pendingAction?.type !== type) return
+    this.pendingAction = null
+    clearTimeout(this.actionRetryTimer)
+    this.actionRetryTimer = null
   }
 
   destroy() {
@@ -139,6 +167,7 @@ export class PartySession {
     this.connection = null
     try { this.peer?.destroy() } catch { /* already destroyed */ }
     this.peer = null
+    this.questionHistory.clear()
     this.listeners.clear()
   }
 
@@ -156,6 +185,83 @@ export class PartySession {
       if (token === exceptToken) continue
       try { connection.send({ ...message, from: this.selfToken }) } catch { /* connection handled on close */ }
     }
+  }
+
+  playerTokenForConnection(connection) {
+    for (const [token, stored] of this.guestConnections) if (stored === connection) return token
+    return ''
+  }
+
+  actionIsCurrent(action) {
+    if (!action || this.state.role !== 'guest' || this.state.screen !== 'game') return false
+    const question = this.state.question
+    if (!question || action.gameId !== this.state.gameId || action.questionIndex !== question.index || action.questionId !== question.id) return false
+    if (action.type === 'buzz') {
+      return ['buzzing', 'answering'].includes(this.state.phase)
+        && !this.state.buzzOrder.some((entry) => entry.token === this.selfToken)
+        && !this.state.reveal.some((entry) => entry.token === this.selfToken)
+        && this.state.turn?.token !== this.selfToken
+    }
+    if (action.type === 'answer') {
+      return this.state.phase === 'answering' && this.state.turn?.token === this.selfToken
+        && !this.state.reveal.some((entry) => entry.token === this.selfToken)
+    }
+    return false
+  }
+
+  armActionRetry() {
+    clearTimeout(this.actionRetryTimer)
+    this.actionRetryTimer = null
+    const action = this.pendingAction
+    if (!this.actionIsCurrent(action)) { this.clearPendingAction(); return }
+    this.actionRetryTimer = setTimeout(() => {
+      this.actionRetryTimer = null
+      if (!this.actionIsCurrent(action) || this.pendingAction !== action) { this.clearPendingAction(); return }
+      if (!this.state.connected || !this.send(action)) {
+        this.scheduleReconnect()
+        this.armActionRetry()
+        return
+      }
+      action.retries += 1
+      // A reliable PeerJS channel normally acknowledges through state updates
+      // almost immediately. If it does not, reconnect and replay the same
+      // idempotent action against the host snapshot.
+      if (action.retries >= MAX_ACTION_RETRIES) {
+        const connection = this.connection
+        if (connection) this.connectionClosed(connection)
+        return
+      }
+      this.armActionRetry()
+    }, ACTION_RETRY_MS)
+  }
+
+  sendGuestAction(message) {
+    const question = this.state.question
+    if (this.state.role !== 'guest' || !question) return false
+    const action = {
+      ...message,
+      gameId: this.state.gameId,
+      questionIndex: question.index,
+      questionId: question.id,
+      retries: 0,
+    }
+    this.clearPendingAction()
+    this.pendingAction = action
+    if (!this.send(action)) {
+      this.patch({ error: 'Koneksi belum siap. Tekananmu akan dikirim otomatis setelah tersambung kembali.' })
+      this.scheduleReconnect()
+    }
+    this.armActionRetry()
+    // The action is accepted locally even during a reconnect, so a tap never
+    // disappears just because the guest channel is temporarily unavailable.
+    return true
+  }
+
+  resumePendingAction() {
+    const action = this.pendingAction
+    if (!this.actionIsCurrent(action)) { this.clearPendingAction(); return }
+    if (this.send(action)) action.retries += 1
+    this.armActionRetry()
   }
 
   // --- Ruang ---------------------------------------------------------------
@@ -194,7 +300,7 @@ export class PartySession {
     this.guestConnections.clear()
     try { this.connection?.close() } catch { /* noop */ }
     this.connection = null
-    this.pending = null
+    this.pendingConnections.clear()
     try { this.peer?.destroy() } catch { /* noop */ }
     this.peer = null
     this.round = null
@@ -314,19 +420,25 @@ export class PartySession {
       if (connection.open) send()
       else connection.on('open', send)
     }
-    if (this.guestConnections.size >= MAX_GUESTS) { reject('Ruang sudah penuh. Maksimal 5 pemain.'); return }
+    // Do not reject based on the number of channels here: a returning player
+    // needs a new channel even when the room is already at its 5-player cap.
+    if (this.pendingConnections.size >= MAX_PLAYERS * 2) { reject('Ruang sedang menerima terlalu banyak koneksi. Coba lagi sebentar.'); return }
     connection.on('data', (message) => {
-      if (connection !== this.pending && ![...this.guestConnections.values()].includes(connection)) return
+      const pending = this.pendingConnections.has(connection)
+      const known = [...this.guestConnections.values()].includes(connection)
+      if (!pending && !known) return
       if (!message || typeof message !== 'object' || typeof message.type !== 'string') return
-      if (connection === this.pending && message.type === 'join') this.acceptJoin(connection, message)
-      else this.handleMessage(message, connection)
+      if (pending) {
+        if (message.type === 'join') this.acceptJoin(connection, message)
+        return
+      }
+      this.handleMessage(message, connection)
     })
     connection.on('close', () => this.guestClosed(connection))
     connection.on('error', () => this.guestClosed(connection))
-    this.pending = connection
+    this.pendingConnections.add(connection)
     setTimeout(() => {
-      if (this.pending === connection) {
-        this.pending = null
+      if (this.pendingConnections.delete(connection)) {
         try { connection.close() } catch { /* noop */ }
       }
     }, this.joinTimeoutMs)
@@ -340,18 +452,24 @@ export class PartySession {
     const returning = this.state.players.some((player) => player.token === token && !player.isHost)
     if (invalid || oldVersion) {
       try { connection.send({ type: 'rejected', reason: invalid ? 'Data pemain tidak valid.' : 'Versi KuisKita berbeda. Muat ulang halaman lalu gabung lagi.' }) } catch { /* noop */ }
-      this.pending = null
+      this.pendingConnections.delete(connection)
       setTimeout(() => { try { connection.close() } catch { /* noop */ } }, 100)
       return
     }
     if (!returning && this.state.players.filter((player) => !player.isHost).length >= MAX_GUESTS) {
       try { connection.send({ type: 'rejected', reason: 'Ruang sudah penuh. Maksimal 5 pemain.' }) } catch { /* noop */ }
-      this.pending = null
+      this.pendingConnections.delete(connection)
       setTimeout(() => { try { connection.close() } catch { /* noop */ } }, 100)
       return
     }
-    this.pending = null
+    this.pendingConnections.delete(connection)
+    const previousConnection = this.guestConnections.get(token)
     this.guestConnections.set(token, connection)
+    if (previousConnection && previousConnection !== connection) {
+      // Reconnect wins over an older channel. guestClosed() ignores the old one
+      // because it is no longer stored in guestConnections.
+      try { previousConnection.close() } catch { /* noop */ }
+    }
     const wire = sanitizeWireProfile(message.profile)
     const players = [...this.state.players]
     const existingIndex = players.findIndex((player) => player.token === token)
@@ -376,7 +494,7 @@ export class PartySession {
   }
 
   guestClosed(connection) {
-    if (this.pending === connection) { this.pending = null; return }
+    if (this.pendingConnections.delete(connection)) return
     for (const [token, stored] of this.guestConnections) {
       if (stored !== connection) continue
       this.guestConnections.delete(token)
@@ -411,14 +529,24 @@ export class PartySession {
     this.patch({ status: 'preparing', preparation: { done: 0, total: Number(settings.count) }, error: '' })
     this.broadcast({ type: 'preparing', done: 0, total: Number(settings.count) })
     let questions
+    const historyKey = questionHistoryKey(settings)
+    const earlierPrompts = this.questionHistory.get(historyKey) || []
     try {
       questions = settings.source === 'groq'
-        ? await generateBuzzerQuestions(settings, this.apiKey, { onProgress: ({ done, total }) => { this.patch({ preparation: { done, total } }); this.broadcast({ type: 'preparing', done, total }) } })
+        ? await generateBuzzerQuestions(settings, this.apiKey, {
+          avoidPrompts: earlierPrompts,
+          onProgress: ({ done, total }) => { this.patch({ preparation: { done, total } }); this.broadcast({ type: 'preparing', done, total }) },
+        })
         : makeBuzzerQuestions({ category: settings.category, method: settings.method, count: settings.count, random: () => Math.random() })
     } catch (err) {
       this.patch({ status: 'waiting', preparation: null, error: safeError(err) })
       this.broadcast({ type: 'preparation-failed', error: safeError(err) })
       return false
+    }
+    if (settings.source === 'groq') {
+      if (!this.questionHistory.has(historyKey) && this.questionHistory.size >= 10) this.questionHistory.delete(this.questionHistory.keys().next().value)
+      this.questionHistory.delete(historyKey)
+      this.questionHistory.set(historyKey, [...earlierPrompts, ...questions.map((question) => question.prompt)].slice(-1000))
     }
     this.round = { questions, index: 0 }
     this.history = []
@@ -427,13 +555,14 @@ export class PartySession {
     const players = this.state.players.map((player) => ({ ...player, points: 0, correct: 0, wrong: 0, lastGain: 0 }))
     const first = questions[0]
     const shownAt = this.clock()
+    const gameId = makeToken()
     this.patch({
-      screen: 'game', status: 'playing', gameId: makeToken(), players,
+      screen: 'game', status: 'playing', gameId, players,
       question: wireQuestion(first, 0, questions.length), questionShownAt: shownAt,
       phase: 'buzzing', turn: null, buzzOrder: [], reveal: [], history: [], result: null,
       preparation: null, rematchVotes: [],
     })
-    this.broadcast({ type: 'question', question: wireQuestion(first, 0, questions.length), shownAt })
+    this.broadcast({ type: 'question', gameId, question: wireQuestion(first, 0, questions.length), shownAt })
     this.broadcast({ type: 'players', players })
     return true
   }
@@ -453,9 +582,12 @@ export class PartySession {
   }
 
   buzz() {
-    const { screen, role, selfToken } = this.state
+    const { screen, role, selfToken, phase, buzzOrder, reveal, turn } = this.state
     if (screen !== 'game') return false
-    if (role === 'guest') return this.send({ type: 'buzz', sentAt: this.clock() })
+    if (role === 'guest') {
+      if (!['buzzing', 'answering'].includes(phase) || buzzOrder.some((entry) => entry.token === selfToken) || reveal.some((entry) => entry.token === selfToken) || turn?.token === selfToken) return false
+      return this.sendGuestAction({ type: 'buzz', sentAt: this.clock() })
+    }
     return this.handleBuzz(selfToken)
   }
 
@@ -509,9 +641,12 @@ export class PartySession {
   }
 
   submitAnswer(value) {
-    const { screen, role, selfToken } = this.state
+    const { screen, role, selfToken, phase, turn, reveal } = this.state
     if (screen !== 'game') return false
-    if (role === 'guest') return this.send({ type: 'answer', value, sentAt: this.clock() })
+    if (role === 'guest') {
+      if (phase !== 'answering' || turn?.token !== selfToken || reveal.some((entry) => entry.token === selfToken)) return false
+      return this.sendGuestAction({ type: 'answer', value, sentAt: this.clock() })
+    }
     return this.handleAnswer(selfToken, value)
   }
 
@@ -581,7 +716,7 @@ export class PartySession {
       question: wireQuestion(question, this.round.index, total), questionShownAt: shownAt,
       phase: 'buzzing', turn: null, buzzOrder: [], reveal: [],
     })
-    this.broadcast({ type: 'question', question: wireQuestion(question, this.round.index, total), shownAt })
+    this.broadcast({ type: 'question', gameId: this.state.gameId, question: wireQuestion(question, this.round.index, total), shownAt })
   }
 
   skipQuestion() {
@@ -632,7 +767,17 @@ export class PartySession {
   }
 
   handleHostMessage(message, connection) {
-    const token = typeof message.from === 'string' ? message.from : ''
+    // A guest cannot choose another player's token. The channel was accepted
+    // only after its join packet, so it is the authoritative identity.
+    const token = this.playerTokenForConnection(connection)
+    if (!token) return
+    const currentQuestion = this.round?.questions?.[this.round?.index]
+    const staleAction = ['buzz', 'answer'].includes(message.type) && (
+      (typeof message.gameId === 'string' && message.gameId && message.gameId !== this.state.gameId)
+      || (Number.isInteger(message.questionIndex) && message.questionIndex !== this.round?.index)
+      || (typeof message.questionId === 'string' && currentQuestion && message.questionId !== currentQuestion.id)
+    )
+    if (staleAction) return
     if (message.type === 'profile') {
       const wire = sanitizeWireProfile(message.profile)
       if (!wire) return
@@ -662,6 +807,7 @@ export class PartySession {
   handleGuestMessage(message) {
     if (message.type === 'rejected') {
       clearTimeout(this.connectTimer)
+      this.clearPendingAction()
       this.patch({ status: 'error', connected: false, error: String(message.reason || 'Tidak dapat bergabung ke ruang.').slice(0, 180) })
       return
     }
@@ -672,8 +818,13 @@ export class PartySession {
       }
       clearTimeout(this.connectTimer)
       this.reconnectAttempts = 0
+      // Trust the token bound by the host to this accepted channel. In normal
+      // joins it matches our locally generated token; applying it here keeps a
+      // reconnected guest's turn/buzzer controls tied to the right player.
+      if (typeof message.youAre === 'string' && message.youAre.length >= 6) this.selfToken = message.youAre
       this.patch({
         connected: true,
+        selfToken: this.selfToken,
         status: message.preparation ? 'preparing' : 'joined',
         code: message.code || this.state.code,
         gameId: message.gameId || '',
@@ -691,6 +842,7 @@ export class PartySession {
         preparation: message.preparation || null,
         error: '',
       })
+      this.resumePendingAction()
       return
     }
     if (message.type === 'players') { this.patch({ players: message.players || [] }); return }
@@ -698,7 +850,8 @@ export class PartySession {
     if (message.type === 'preparing') { this.patch({ status: 'preparing', preparation: { done: message.done, total: message.total } }); return }
     if (message.type === 'preparation-failed') { this.patch({ status: 'waiting', preparation: null, error: message.error || 'Soal belum berhasil disiapkan.' }); return }
     if (message.type === 'question') {
-      this.patch({ screen: 'game', status: 'playing', question: message.question, questionShownAt: message.shownAt, phase: 'buzzing', turn: null, buzzOrder: [], reveal: [], preparation: null, error: '' })
+      this.clearPendingAction()
+      this.patch({ screen: 'game', status: 'playing', gameId: typeof message.gameId === 'string' ? message.gameId : this.state.gameId, question: message.question, questionShownAt: message.shownAt, phase: 'buzzing', turn: null, buzzOrder: [], reveal: [], preparation: null, error: '' })
       return
     }
     if (message.type === 'buzzed') {
@@ -709,16 +862,19 @@ export class PartySession {
         return existing || { token: t, name: players.find((p) => p.token === t)?.name || t, at: message.at }
       })
       this.patch({ buzzOrder })
+      if (order.includes(this.selfToken)) this.clearPendingAction('buzz')
       return
     }
     if (message.type === 'turn') {
       if (!message.token) { this.patch({ phase: 'buzzing', turn: null }); return }
       this.patch({ phase: 'answering', turn: { token: message.token, name: message.name, at: message.at } })
+      if (message.token === this.selfToken) this.clearPendingAction('buzz')
       return
     }
     if (message.type === 'reveal') {
       const reveal = [...this.state.reveal.filter((entry) => entry.token !== message.entry?.token), message.entry].filter(Boolean)
       this.patch({ reveal, players: message.players || this.state.players })
+      if (message.entry?.token === this.selfToken) this.clearPendingAction('answer')
       return
     }
     if (message.type === 'question-end') {
@@ -728,11 +884,13 @@ export class PartySession {
       const item = { index, prompt: this.state.question?.prompt || '', kind: this.state.question?.kind || 'mc', entries: [...this.state.reveal], answer: message.answer }
       if (existing >= 0) history[existing] = item
       else history.push(item)
+      this.clearPendingAction()
       this.patch({ phase: 'revealed', turn: null, history })
       return
     }
     if (message.type === 'result') {
       this.clearGameTimers()
+      this.clearPendingAction()
       this.patch({ screen: 'results', status: 'finished', phase: 'idle', question: null, turn: null, result: message.result || null })
       return
     }

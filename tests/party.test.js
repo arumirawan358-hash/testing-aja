@@ -93,6 +93,19 @@ describe('ruang 5 pemain', () => {
     for (const guest of guests) expect(guest.state.players).toHaveLength(5)
   })
 
+  it('menerima beberapa pemain yang menekan gabung hampir bersamaan', async () => {
+    const network = new FakeNetwork()
+    const host = makeSession(network)
+    const first = makeSession(network)
+    const second = makeSession(network)
+    host.createRoom({ name: 'Host Baik', settings: settings() })
+    await until(() => host.state.status === 'waiting')
+    first.joinRoom({ name: 'Tamu Kilat 1', code: host.state.code })
+    second.joinRoom({ name: 'Tamu Kilat 2', code: host.state.code })
+    await until(() => host.state.players.length === 3 && first.state.connected && second.state.connected)
+    expect(host.state.players.map((player) => player.name)).toEqual(['Host Baik', 'Tamu Kilat 1', 'Tamu Kilat 2'])
+  })
+
   it('menampilkan seluruh pemain beserta status koneksi ke semua anggota', async () => {
     const { host, guests } = await joinedParty(3)
     for (const viewer of [host, ...guests]) {
@@ -171,6 +184,22 @@ describe('buzzer dan giliran', () => {
     await until(() => host.state.buzzOrder.length === 3)
     expect(host.state.turn.token).toBe(guests[1].state.selfToken)
     for (const viewer of [host, ...guests]) expect(viewer.state.turn.token).toBe(guests[1].state.selfToken)
+  })
+
+  it('menyimpan tekanan buzzer tamu saat RTC putus lalu mengirimkannya setelah tersambung kembali', async () => {
+    const { host, guests } = await joinedParty(1, { network: new FakeNetwork() })
+    const guest = guests[0]
+    await host.startGame()
+    await until(() => guest.state.phase === 'buzzing')
+    guest.connection.close()
+    await until(() => !guest.state.connected)
+    // Ketukan diterima lokal, tidak hilang hanya karena kanal sedang reconnect.
+    expect(guest.buzz()).toBe(true)
+    expect(guest.pendingAction?.type).toBe('buzz')
+    guest.reconnect()
+    await until(() => host.state.turn?.token === guest.state.selfToken)
+    await until(() => guest.pendingAction === null)
+    expect(host.state.buzzOrder.map((entry) => entry.token)).toContain(guest.state.selfToken)
   })
 
   it('hanya satu pemain yang menerima kesempatan pertama meski ditekan berbarengan', async () => {
