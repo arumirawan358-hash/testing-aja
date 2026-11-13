@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { CUSTOM_SUBJECT, DEFAULT_CONFIG, gradeLabel, LEVELS } from '../src/data/subjects.js'
-import { generateBuzzerQuestions, generateGroqQuestions, GROQ_MODEL, questionFingerprint } from '../src/lib/groq.js'
+import { generateBuzzerQuestions, generateGroqQuestions, GROQ_MODEL, GROQ_SCHEMA_STRICT, hasUnexpectedEnglish, promptsAreTooSimilar, questionFingerprint, requiresIndonesian } from '../src/lib/groq.js'
 import { isValidQuestion } from '../src/lib/questions.js'
 
 const fakeKey = 'private-key-for-test-only'
@@ -32,7 +32,10 @@ describe('Groq langsung dari browser', () => {
     expect(request.credentials).toBe('omit')
     expect(request.referrerPolicy).toBe('no-referrer')
     expect(body.model).toBe(GROQ_MODEL)
-    expect(body.response_format.json_schema.strict).toBe(true)
+    // GPT-OSS only accepts Groq's best-effort schema mode; local validation
+    // below protects the question shape and avoids a provider-side 400.
+    expect(body.response_format.json_schema.strict).toBe(GROQ_SCHEMA_STRICT)
+    expect(body.response_format.json_schema.strict).toBe(false)
     expect(body.response_format.json_schema.schema.additionalProperties).toBe(false)
     expect(body.messages[1].content).toContain('jenjang SMA / Sederajat, kelas 12')
     expect(body.messages[1].content).toContain('Seni Budaya')
@@ -84,6 +87,40 @@ describe('Groq langsung dari browser', () => {
     expect(questions.map((item) => item.prompt)).toEqual([makeQuestion(2).prompt, makeQuestion(3).prompt])
     expect(fetchImpl).toHaveBeenCalledTimes(2)
     expect(JSON.parse(fetchImpl.mock.calls[0][1].body).messages[1].content).toContain(old.prompt)
+  })
+
+  it('replaces duplicate/paraphrased and unwanted English AI questions with Indonesian questions', async () => {
+    const english = {
+      prompt: 'What is the capital city of Indonesia?',
+      options: ['Jakarta', 'Bandung', 'Surabaya', 'Medan'], answer: 0,
+      explanation: 'The correct answer is Jakarta.',
+    }
+    const capital = {
+      prompt: 'Apa ibu kota Indonesia?',
+      options: ['Jakarta', 'Bandung', 'Surabaya', 'Medan'], answer: 0,
+      explanation: 'Ibu kota Indonesia adalah Jakarta.',
+    }
+    const paraphrase = {
+      prompt: 'Sebutkan ibu kota Indonesia.',
+      options: ['Jakarta', 'Bandung', 'Surabaya', 'Medan'], answer: 0,
+      explanation: 'Ibu kota Indonesia adalah Jakarta.',
+    }
+    const anthem = {
+      prompt: 'Siapa pencipta lagu Indonesia Raya?',
+      options: ['W.R. Supratman', 'Ki Hajar Dewantara', 'Ismail Marzuki', 'Ibu Sud'], answer: 0,
+      explanation: 'Indonesia Raya diciptakan oleh W.R. Supratman.',
+    }
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(reply([english, capital]))
+      .mockResolvedValueOnce(reply([paraphrase, anthem]))
+    const questions = await generateGroqQuestions({ ...config, count: 2 }, fakeKey, { fetchImpl })
+    expect(questions.map((question) => question.prompt)).toEqual([capital.prompt, anthem.prompt])
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).messages[1].content).toContain('WAJIB tulis')
+    expect(hasUnexpectedEnglish(english)).toBe(true)
+    expect(promptsAreTooSimilar(capital.prompt, paraphrase.prompt)).toBe(true)
+    expect(requiresIndonesian({ subject: 'Matematika' })).toBe(true)
+    expect(requiresIndonesian({ subject: 'Bahasa Inggris' })).toBe(false)
   })
 
   it('rejects a missing key, invalid settings, and malformed responses without leaking the key', async () => {
@@ -250,6 +287,22 @@ describe('Groq untuk mode Siapa Cepat Dia Menjawab', () => {
     expect(questions[0].kind).toBe('mc')
     expect(questions[1].naturalAnswer).toContain('81')
     expect(questions[1].accepted).toContain('81')
+  })
+
+  it('menyaring soal buzzer berbahasa Inggris dan parafrase yang sama lalu meminta pengganti', async () => {
+    const english = { prompt: 'What is three plus four?', kind: 'mc', options: ['7', '6', '8', '9'], answerIndex: 0, answerText: '7', accepted: [], naturalAnswer: '7', explanation: 'The answer is seven.' }
+    const capital = { prompt: 'Apa ibu kota Indonesia?', kind: 'mc', options: ['Jakarta', 'Bandung', 'Surabaya', 'Medan'], answerIndex: 0, answerText: 'Jakarta', accepted: [], naturalAnswer: 'Jakarta', explanation: 'Ibu kota Indonesia adalah Jakarta.' }
+    const paraphrase = { ...capital, prompt: 'Sebutkan ibu kota Indonesia.' }
+    const anthem = { prompt: 'Siapa pencipta lagu Indonesia Raya?', kind: 'mc', options: ['W.R. Supratman', 'Ki Hajar Dewantara', 'Ismail Marzuki', 'Ibu Sud'], answerIndex: 0, answerText: 'W.R. Supratman', accepted: [], naturalAnswer: 'W.R. Supratman', explanation: 'Indonesia Raya diciptakan oleh W.R. Supratman.' }
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(reply([english, capital]))
+      .mockResolvedValueOnce(reply([paraphrase, anthem]))
+    const questions = await generateBuzzerQuestions({ category: 'Pengetahuan Umum', method: 'mc', count: 2 }, fakeKey, { fetchImpl })
+    expect(questions.map((question) => question.prompt)).toEqual([capital.prompt, anthem.prompt])
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    const firstBody = JSON.parse(fetchImpl.mock.calls[0][1].body)
+    expect(firstBody.response_format.json_schema.strict).toBe(false)
+    expect(firstBody.messages[1].content).toContain('WAJIB tulis')
   })
 
   it('menolak key kosong dan respons rusak tanpa membocorkan key', async () => {
