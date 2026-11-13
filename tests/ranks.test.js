@@ -58,3 +58,15 @@ describe('rank kepintaran', () => {
     expect(sanitizeWireProfile({ name: 'X'.repeat(999) }).name).toHaveLength(24)
   })
 })
+
+describe('akurasi profil lawan', () => {
+  it('null tetap "belum ada" saat profil melintasi kabel', () => {
+    const view = toViewProfile({ name: 'Bintang', smartPoints: 0 })
+    expect(view.accuracy).toBeNull()
+    const wire = sanitizeWireProfile({ ...view })
+    expect(wire.accuracy).toBeNull()
+    expect(sanitizeWireProfile({ name: 'Bintang', accuracy: null }).accuracy).toBeNull()
+    expect(sanitizeWireProfile({ name: 'Bintang', accuracy: 42 }).accuracy).toBe(42)
+    expect(sanitizeWireProfile({ name: 'Bintang', totalAnswered: 4, correctAnswers: 2 }).accuracy).toBe(50)
+  })
+})

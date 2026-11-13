@@ -13,7 +13,7 @@ function Switch({ label, checked, onChange, silent = false }) {
   </button>
 }
 
-function ProfileView({ profile, saveName, saveAvatar, saveFrame }) {
+function ProfileView({ profile, saveName, saveAvatar, saveFrame, gameHistory = [] }) {
   const [name, setName] = useState(profile.name)
   const [feedback, setFeedback] = useState(null)
   function save(event) {
@@ -39,6 +39,12 @@ function ProfileView({ profile, saveName, saveAvatar, saveFrame }) {
     </form>
     <ProfileCard profile={toViewProfile(profile)} self />
     <div className="profile-stats" aria-label="Statistik di browser ini"><div><BookOpen size={18} /><strong>{profile.gamesPlayed}</strong><span>Kuis selesai</span></div><div><Trophy size={18} /><strong>{profile.bestScore === null ? '—' : profile.bestScore}</strong><span>Nilai terbaik</span></div></div>
+    {gameHistory.length > 0 && <div className="game-history" aria-label="Riwayat permainan">
+      <span className="field-title">Riwayat permainan terakhir</span>
+      <ul>{gameHistory.slice(-5).reverse().map((item) => (
+        <li key={`${item.gameId}-${item.at}`}><strong>{item.mode === 'buzzer' ? 'Siapa Cepat Dia Menjawab' : 'Kuis Klasik'}</strong><small>{item.roomCode ? `Ruang ${item.roomCode} · ` : ''}{item.standings.length} pemain · juara: {item.standings[0]?.name || '—'}</small></li>
+      ))}</ul>
+    </div>}
     <p className="panel-footnote"><LockKeyhole size={14} /> Profil dan statistik tersimpan di browser ini, bukan akun online. Teman bermain hanya melihat ringkasan yang dikirim langsung saat kalian terhubung.</p>
   </div>
 }
@@ -107,7 +113,7 @@ function AboutView({ openPanel }) {
   </div>
 }
 
-export default function PreferencesPanel({ panel, profile, hintEnabled, setHintEnabled, saveName, saveAvatar, saveFrame, openPanel, closePanel, roomCode }) {
+export default function PreferencesPanel({ panel, profile, hintEnabled, setHintEnabled, saveName, saveAvatar, saveFrame, openPanel, closePanel, roomCode, gameHistory = [] }) {
   const dialog = useRef(null)
   const isOpen = Boolean(panel)
   useEffect(() => {
@@ -141,7 +147,7 @@ export default function PreferencesPanel({ panel, profile, hintEnabled, setHintE
         <div><span className="panel-header-label">KUISKITA</span><h2 id="preferences-title">{title}</h2></div>
         <button type="button" className="panel-icon-button panel-close" onClick={closePanel} aria-label="Tutup"><X size={19} /></button>
       </header>
-      {panel === 'profile' ? <ProfileView profile={profile} saveName={saveName} saveAvatar={saveAvatar} saveFrame={saveFrame} /> : panel === 'about' ? <AboutView openPanel={openPanel} /> : panel === 'friends' ? <FriendsView roomCode={roomCode} /> : <SettingsView hintEnabled={hintEnabled} setHintEnabled={setHintEnabled} openPanel={openPanel} />}
+      {panel === 'profile' ? <ProfileView profile={profile} saveName={saveName} saveAvatar={saveAvatar} saveFrame={saveFrame} gameHistory={gameHistory} /> : panel === 'about' ? <AboutView openPanel={openPanel} /> : panel === 'friends' ? <FriendsView roomCode={roomCode} /> : <SettingsView hintEnabled={hintEnabled} setHintEnabled={setHintEnabled} openPanel={openPanel} />}
     </section>
   </div>
 }
